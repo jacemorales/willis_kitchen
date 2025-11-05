@@ -50,7 +50,7 @@ ADMIN_ID = 123456789  # Replace with your Telegram User ID
     WORKER_MATRIC_NO,
     WORKER_PHONE,
     WORKER_HISTORY,
-) = range(22)
+) = range(21)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -295,7 +295,7 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
         await query.edit_message_text("Worker rejected.")
 
     # Clean up the application data
-    del context.user_data["worker_application_details"]
+    del context.bot_data[f"worker_application_{user_id}"]
 
 
 async def working_history(update: Update, context: CallbackContext) -> int:
@@ -790,10 +790,14 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
     message = "📦 Your Orders:\n"
     total_spent = 0
     for i, order in enumerate(orders):
-        order_id, _, _, food_type, _, _, quantities, total, order_date = order
+        _, _, _, food_type, _, _, quantities, total, order_date, _, _, _ = order
         quantities = json.loads(quantities)
-        food_item = list(quantities.keys())[0]
-        message += f"{i+1}️⃣ {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} on {order_date}\n"
+
+        if food_type == 'Indomie' or food_type == 'Custard':
+            food_item = list(quantities.keys())[0]
+            message += f"{i+1}️⃣ {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} on {order_date}\n"
+        else: # Cafe order
+            message += f"{i+1}️⃣ {food_type} - ₦{total} on {order_date}\n"
         total_spent += total
 
     message += "-------------------\n"
@@ -836,10 +840,14 @@ async def view_today_orders(update: Update, context: CallbackContext) -> int:
 
     message = "📅 Today's Orders:\n"
     for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date = order
+        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _ = order
         quantities = json.loads(quantities)
-        food_item = list(quantities.keys())[0]
-        message += f"👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} at {order_date}\n"
+
+        if food_type == 'Indomie' or food_type == 'Custard':
+            food_item = list(quantities.keys())[0]
+            message += f"👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} at {order_date}\n"
+        else: # Cafe order
+            message += f"👤 {username} ({user_id}) - {food_type} - ₦{total} at {order_date}\n"
 
     await query.edit_message_text(message)
     return ADMIN_MENU
@@ -856,10 +864,14 @@ async def view_all_orders(update: Update, context: CallbackContext) -> int:
 
     message = "📦 All Orders (sorted by date):\n"
     for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date = order
+        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _ = order
         quantities = json.loads(quantities)
-        food_item = list(quantities.keys())[0]
-        message += f"📅 {order_date} - 👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total}\n"
+
+        if food_type == 'Indomie' or food_type == 'Custard':
+            food_item = list(quantities.keys())[0]
+            message += f"📅 {order_date} - 👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total}\n"
+        else: # Cafe order
+            message += f"📅 {order_date} - 👤 {username} ({user_id}) - {food_type} - ₦{total}\n"
 
     await query.edit_message_text(message)
     return ADMIN_MENU
