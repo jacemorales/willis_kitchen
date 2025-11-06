@@ -22,7 +22,7 @@ from database import (
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users
 )
-from messages import DAILY_MESSAGES
+from messages import DAILY_MESSAGES, SHARE_MESSAGE
 
 # Enable logging
 logging.basicConfig(
@@ -44,7 +44,10 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_EGG_QUANTITY,
     INDOMIE_SAUSAGE_QUANTITY,
     INDOMIE_SUYA_AMOUNT,
+    INDOMIE_SARDINE_QUANTITY,
+    INDOMIE_SOURCE,
     CUSTARD_QUANTITY,
+    CUSTARD_SOURCE,
     CUSTARD_ADDITIONS,
     CUSTARD_SUGAR_QUANTITY,
     CUSTARD_MILK_QUANTITY,
@@ -101,7 +104,8 @@ async def cafe_menu(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "Please include the item, quantity, and total amount to be spent on the item."
+        "Please include the item, quantity, and total amount to be spent on the item.\n\n"
+        "Example: Meat Pie, 2, 1600"
     )
     return CAFE_ORDER
 
@@ -148,7 +152,7 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
         quantities=order["quantities"],
         total=order["total"],
         source="cafe",
-        room_number=order["room_number"],
+        hall_and_room_number=order["hall_and_room_number"],
         delivery_time=order["delivery_time"],
         service_charge=order["service_charge"],
     )
@@ -295,6 +299,26 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
     del context.bot_data[f"worker_application_{user_id}"]
 
 
+async def share_command(update: Update, context: CallbackContext) -> None:
+    """Sends the share message with share and copy buttons."""
+    share_url = f"https://t.me/share/url?url={SHARE_MESSAGE}"
+    keyboard = [
+        [
+            InlineKeyboardButton("Share 🚀", url=share_url),
+            InlineKeyboardButton("Copy 📋", callback_data="copy_share_message"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(SHARE_MESSAGE, reply_markup=reply_markup)
+
+
+async def copy_share_message_callback(update: Update, context: CallbackContext) -> None:
+    """Sends the share message in a pre-formatted text block for easy copying."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(f"```\n{SHARE_MESSAGE}\n```", parse_mode="MarkdownV2")
+
+
 async def back_to_kitchen_menu(update: Update, context: CallbackContext) -> int:
     """Returns to the kitchen menu."""
     return await kitchen_menu(update, context)
@@ -310,15 +334,18 @@ async def back_to_custard_quantity(update: Update, context: CallbackContext) -> 
     return await custard_start(update, context)
 
 
-async def ask_for_room_number(update: Update, context: CallbackContext) -> int:
-    """Asks for the user's room number."""
-    await update.callback_query.edit_message_text("Please enter your room number for delivery:")
+async def ask_for_hall_and_room_number(update: Update, context: CallbackContext) -> int:
+    """Asks for the user's hall and room number."""
+    if update.callback_query:
+        await update.callback_query.edit_message_text("Please enter your Hall and Room Number for delivery:")
+    else:
+        await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
     return GET_ROOM_NUMBER
 
 
-async def get_room_number(update: Update, context: CallbackContext) -> int:
-    """Stores the room number and asks for the delivery time."""
-    context.user_data["order"]["room_number"] = update.message.text
+async def get_hall_and_room_number(update: Update, context: CallbackContext) -> int:
+    """Stores the hall and room number and asks for the delivery time."""
+    context.user_data["order"]["hall_and_room_number"] = update.message.text
     await update.message.reply_text("What time would you like your order to be delivered?")
     return GET_DELIVERY_TIME
 
@@ -417,6 +444,9 @@ async def indomie_quantity(update: Update, context: CallbackContext) -> int:
         [
             InlineKeyboardButton("Vegetables", callback_data="vegetables"),
             InlineKeyboardButton("Suya", callback_data="suya"),
+            InlineKeyboardButton("Sardine", callback_data="sardine"),
+        ],
+        [
             InlineKeyboardButton("None", callback_data="none_mixings"),
         ],
         [
@@ -424,11 +454,18 @@ async def indomie_quantity(update: Update, context: CallbackContext) -> int:
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [
+        [
+            InlineKeyboardButton("I have my own Indomie", callback_data="own_indomie"),
+            InlineKeyboardButton("Use the kitchen's Indomie", callback_data="kitchen_indomie"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "What mixings would you like the Indomie to be cooked with?",
+        "Will you be providing the Indomie, or should we use ours?",
         reply_markup=reply_markup,
     )
-    return INDOMIE_MIXINGS
+    return INDOMIE_SOURCE
 
 
 async def indomie_mixings(update: Update, context: CallbackContext) -> int:
@@ -458,16 +495,34 @@ async def indomie_mixings(update: Update, context: CallbackContext) -> int:
     return INDOMIE_MIXINGS
 
 
+async def indomie_source(update: Update, context: CallbackContext) -> int:
+    """Stores the source of the Indomie and asks for mixings."""
+    query = update.callback_query
+    await query.answer()
+    source = query.data
+    context.user_data["order"]["source_indomie"] = source
+
+    keyboard = indomie_mixings_keyboard()
+    await query.edit_message_text(
+        "What mixings would you like the Indomie to be cooked with?",
+        reply_markup=keyboard,
+    )
+    return INDOMIE_MIXINGS
+
+
 def indomie_mixings_keyboard():
     keyboard = [
         [
             InlineKeyboardButton("Vegetables", callback_data="vegetables"),
             InlineKeyboardButton("Suya", callback_data="suya"),
+            InlineKeyboardButton("Sardine", callback_data="sardine"),
+        ],
+        [
             InlineKeyboardButton("None", callback_data="none_mixings"),
         ],
         [
             InlineKeyboardButton("Next ➡️", callback_data="next_toppings"),
-            InlineKeyboardButton("Cancel ❌", callback_data="cancel"),
+            InlineKeyboardButton("Done ✅", callback_data="next_toppings"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -528,7 +583,6 @@ def indomie_toppings_keyboard():
         ],
         [
             InlineKeyboardButton("Next ➡️", callback_data="next_quantities"),
-            InlineKeyboardButton("Cancel ❌", callback_data="cancel"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -543,6 +597,9 @@ async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
     elif "sausage" in order["toppings"]:
         await update.callback_query.edit_message_text("How many sausages would you like?")
         return INDOMIE_SAUSAGE_QUANTITY
+    elif "sardine" in order["mixings"]:
+        await update.callback_query.edit_message_text("How many sardines would you like?")
+        return INDOMIE_SARDINE_QUANTITY
     elif "suya" in order["mixings"]:
         await update.callback_query.edit_message_text("Enter the amount for suya (₦):")
         return INDOMIE_SUYA_AMOUNT
@@ -576,6 +633,19 @@ async def indomie_sausage_quantity(update: Update, context: CallbackContext) -> 
         return INDOMIE_SUYA_AMOUNT
     else:
         await update.message.reply_text("Please enter your room number for delivery:")
+        return GET_ROOM_NUMBER
+
+
+async def indomie_sardine_quantity(update: Update, context: CallbackContext) -> int:
+    """Stores the quantity of sardines."""
+    quantity = int(update.message.text)
+    context.user_data["order"]["quantities"]["Sardine"] = quantity
+    order = context.user_data["order"]
+    if "suya" in order["mixings"]:
+        await update.message.reply_text("Enter the amount for suya (₦):")
+        return INDOMIE_SUYA_AMOUNT
+    else:
+        await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
         return GET_ROOM_NUMBER
 
 
@@ -615,11 +685,18 @@ async def custard_quantity(update: Update, context: CallbackContext) -> int:
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [
+        [
+            InlineKeyboardButton("I have my own Custard", callback_data="own_custard"),
+            InlineKeyboardButton("Use the kitchen's Custard", callback_data="kitchen_custard"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "What would you like to add to your custard?",
+        "Will you be providing the Custard, or should we use ours?",
         reply_markup=reply_markup,
     )
-    return CUSTARD_ADDITIONS
+    return CUSTARD_SOURCE
 
 
 async def custard_additions(update: Update, context: CallbackContext) -> int:
@@ -649,6 +726,21 @@ async def custard_additions(update: Update, context: CallbackContext) -> int:
     return CUSTARD_ADDITIONS
 
 
+async def custard_source(update: Update, context: CallbackContext) -> int:
+    """Stores the source of the Custard and asks for additions."""
+    query = update.callback_query
+    await query.answer()
+    source = query.data
+    context.user_data["order"]["source_custard"] = source
+
+    keyboard = custard_additions_keyboard()
+    await query.edit_message_text(
+        "What would you like to add to your custard?",
+        reply_markup=keyboard,
+    )
+    return CUSTARD_ADDITIONS
+
+
 def custard_additions_keyboard():
     keyboard = [
         [
@@ -658,7 +750,6 @@ def custard_additions_keyboard():
         ],
         [
             InlineKeyboardButton("Next ➡️", callback_data="next_custard_quantities"),
-            InlineKeyboardButton("Cancel ❌", callback_data="cancel"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -726,6 +817,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         "Egg": 400,
         "Sausage": 400,
         "Vegetables": 900,
+        "Sardine": 2000,
         "Suya": 1,  # Price per Naira
         "Custard": 200,
         "Sugar": 50,
@@ -740,7 +832,10 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         summary += f"Service Charge - ₦{order['service_charge']}\n"
     else:
         for item, quantity in order["quantities"].items():
-            if item == "Suya":
+            if (item == "Indomie" and order.get("source_indomie") == "own_indomie") or \
+               (item == "Custard" and order.get("source_custard") == "own_custard"):
+                price = 0
+            elif item == "Suya":
                 price = quantity
                 summary += f"Suya (₦{quantity})\n"
             else:
@@ -785,7 +880,7 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
         toppings=order.get("toppings"),
         quantities=order["quantities"],
         total=order["total"],
-        room_number=order.get("room_number"),
+        hall_and_room_number=order.get("hall_and_room_number"),
         delivery_time=order.get("delivery_time"),
     )
 
@@ -809,6 +904,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         "Egg": 400,
         "Sausage": 400,
         "Vegetables": 900,
+        "Sardine": 2000,
         "Suya": 1,
         "Custard": 200,
         "Sugar": 50,
@@ -823,7 +919,11 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         bill += f"Service Charge - ₦{order['service_charge']}\n"
     else:
         for item, quantity in order["quantities"].items():
-            if item == "Suya":
+            if (item == "Indomie" and order.get("source_indomie") == "own_indomie") or \
+               (item == "Custard" and order.get("source_custard") == "own_custard"):
+                price = 0
+                bill += f"{item} ({quantity} × ₦0) = ₦0\n"
+            elif item == "Suya":
                 price = quantity
                 bill += f"Suya (₦{quantity})\n"
             else:
@@ -987,7 +1087,7 @@ def main() -> None:
             ],
             INDOMIE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_quantity)],
             INDOMIE_MIXINGS: [
-                CallbackQueryHandler(indomie_mixings, pattern="^(vegetables|suya|none_mixings|next_toppings)$"),
+                CallbackQueryHandler(indomie_mixings, pattern="^(vegetables|suya|sardine|none_mixings|next_toppings)$"),
                 CallbackQueryHandler(back_to_kitchen_menu, pattern="^back_to_kitchen_menu$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
@@ -998,8 +1098,11 @@ def main() -> None:
             ],
             INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_sausage_quantity)],
+            INDOMIE_SARDINE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_sardine_quantity)],
             INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_suya_amount)],
+            INDOMIE_SOURCE: [CallbackQueryHandler(indomie_source, pattern="^(own_indomie|kitchen_indomie)$")],
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
+            CUSTARD_SOURCE: [CallbackQueryHandler(custard_source, pattern="^(own_custard|kitchen_custard)$")],
             CUSTARD_ADDITIONS: [
                 CallbackQueryHandler(custard_additions, pattern="^(sugar|milk|none_additions|next_custard_quantities)$"),
                 CallbackQueryHandler(back_to_custard_quantity, pattern="^back_to_custard_quantity$"),
@@ -1022,7 +1125,7 @@ def main() -> None:
             WORKER_HISTORY: [
                 CallbackQueryHandler(view_worker_orders, pattern="^view_(taken|accepted)_orders$"),
             ],
-            GET_ROOM_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_room_number)],
+            GET_ROOM_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_hall_and_room_number)],
             GET_DELIVERY_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_delivery_time)],
         },
         fallbacks=[CommandHandler("start", start)],
@@ -1042,8 +1145,10 @@ def main() -> None:
 
     application.add_handler(main_conv_handler)
     application.add_handler(admin_conv_handler)
+    application.add_handler(CommandHandler("share", share_command))
     application.add_handler(CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"))
     application.add_handler(CallbackQueryHandler(take_order, pattern="^take_"))
+    application.add_handler(CallbackQueryHandler(copy_share_message_callback, pattern="^copy_share_message$"))
 
     # Scheduler for daily messages
     scheduler = AsyncIOScheduler()

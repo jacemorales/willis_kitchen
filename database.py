@@ -24,7 +24,7 @@ def init_db():
             source TEXT DEFAULT 'kitchen',
             status TEXT DEFAULT 'pending',
             taken_by INTEGER,
-            room_number TEXT,
+            hall_and_room_number TEXT,
             delivery_time TEXT,
             service_charge REAL
         )
@@ -35,7 +35,7 @@ def init_db():
         ("source", "TEXT DEFAULT 'kitchen'"),
         ("status", "TEXT DEFAULT 'pending'"),
         ("taken_by", "INTEGER"),
-        ("room_number", "TEXT"),
+        ("hall_and_room_number", "TEXT"),
         ("delivery_time", "TEXT"),
         ("service_charge", "REAL"),
     ]
@@ -44,6 +44,11 @@ def init_db():
             cursor.execute(f"ALTER TABLE orders ADD COLUMN {column} {col_type}")
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE orders RENAME COLUMN room_number TO hall_and_room_number")
+    except sqlite3.OperationalError:
+        pass # Column already renamed or does not exist
 
     # Create workers table
     cursor.execute("""
@@ -60,15 +65,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_order(user_id, username, food_type, mixings, toppings, quantities, total, source='kitchen', room_number=None, delivery_time=None, service_charge=0):
+def add_order(user_id, username, food_type, mixings, toppings, quantities, total, source='kitchen', hall_and_room_number=None, delivery_time=None, service_charge=0):
     """Adds a new order to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     order_date = datetime.now()
     cursor.execute("""
-        INSERT INTO orders (user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, room_number, delivery_time, service_charge)
+        INSERT INTO orders (user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, hall_and_room_number, delivery_time, service_charge)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, username, food_type, json.dumps(mixings), json.dumps(toppings), json.dumps(quantities), total, order_date, source, 'pending', room_number, delivery_time, service_charge))
+    """, (user_id, username, food_type, json.dumps(mixings), json.dumps(toppings), json.dumps(quantities), total, order_date, source, 'pending', hall_and_room_number, delivery_time, service_charge))
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
