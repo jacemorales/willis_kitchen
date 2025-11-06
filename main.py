@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -24,8 +25,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Your Telegram Bot Token & Admin ID
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-ADMIN_ID = 123456789  # Replace with your Telegram User ID
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
 # States
 (
@@ -694,9 +695,13 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     }
 
     for item, quantity in order["quantities"].items():
-        price = pricing[item] * quantity
+        if item == "Suya":
+            price = quantity
+            summary += f"Suya (₦{quantity})\n"
+        else:
+            price = pricing[item] * quantity
+            summary += f"{item} ({quantity})\n"
         total += price
-        summary += f"{item} ({quantity})\n"
 
 
     order["total"] = total
@@ -764,9 +769,13 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     }
 
     for item, quantity in order["quantities"].items():
-        price = pricing[item] * quantity
+        if item == "Suya":
+            price = quantity
+            bill += f"Suya (₦{quantity})\n"
+        else:
+            price = pricing[item] * quantity
+            bill += f"{item} ({quantity} × ₦{pricing[item]}) = ₦{price}\n"
         total += price
-        bill += f"{item} ({quantity} × ₦{pricing[item]}) = ₦{price}\n"
 
 
     bill += "----------------------\n"
@@ -884,8 +893,12 @@ def main() -> None:
 
     application = Application.builder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+    main_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("work", work_with_us_command),
+            CommandHandler("working", working_history),
+        ],
         states={
             MAIN_MENU: [
                 CallbackQueryHandler(kitchen_menu, pattern="^kitchen_menu$"),
@@ -913,8 +926,7 @@ def main() -> None:
             INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_suya_amount)],
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
             CUSTARD_ADDITIONS: [
-                CallbackQueryHandler(custard_additions, pattern="^(sugar|milk|none_additions)$"),
-                CallbackQueryHandler(show_order_summary, pattern="^next_custard_quantities$"),
+                CallbackQueryHandler(custard_additions, pattern="^(sugar|milk|none_additions|next_custard_quantities)$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
             CUSTARD_SUGAR_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_sugar_quantity)],
@@ -923,18 +935,15 @@ def main() -> None:
                 CallbackQueryHandler(confirm_order, pattern="^confirm_order$"),
                 CallbackQueryHandler(view_bill, pattern="^view_bill$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
-            ],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    )
-
-    cafe_conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(cafe_menu, pattern="^cafe_menu$")],
-        states={
-            CAFE_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, cafe_order)],
-            ORDER_SUMMARY: [
                 CallbackQueryHandler(confirm_cafe_order, pattern="^confirm_cafe_order$"),
-                CallbackQueryHandler(start, pattern="^cancel$"),
+            ],
+            CAFE_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, cafe_order)],
+            WORKER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_name)],
+            WORKER_REG_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_reg_no)],
+            WORKER_MATRIC_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_matric_no)],
+            WORKER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_phone)],
+            WORKER_HISTORY: [
+                CallbackQueryHandler(view_worker_orders, pattern="^view_(taken|accepted)_orders$"),
             ],
         },
         fallbacks=[CommandHandler("start", start)],
@@ -952,35 +961,10 @@ def main() -> None:
         fallbacks=[],
     )
 
-    application.add_handler(conv_handler)
-    application.add_handler(cafe_conv_handler)
-
-    work_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("work", work_with_us_command), CallbackQueryHandler(work_with_us, pattern="^work_with_us$")],
-        states={
-            WORKER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_name)],
-            WORKER_REG_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_reg_no)],
-            WORKER_MATRIC_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_matric_no)],
-            WORKER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_phone)],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    )
-
-    application.add_handler(work_conv_handler)
+    application.add_handler(main_conv_handler)
     application.add_handler(admin_conv_handler)
     application.add_handler(CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"))
     application.add_handler(CallbackQueryHandler(take_order, pattern="^take_"))
-
-    worker_history_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("working", working_history)],
-        states={
-            WORKER_HISTORY: [
-                CallbackQueryHandler(view_worker_orders, pattern="^view_(taken|accepted)_orders$"),
-            ],
-        },
-        fallbacks=[CommandHandler("start", start)],
-    )
-    application.add_handler(worker_history_conv_handler)
 
     # Start the Bot
     application.run_polling()

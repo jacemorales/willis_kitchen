@@ -27,10 +27,15 @@ This is a Telegram bot that allows users to order food from Willis Kitchen.
     pip install -r requirements.txt
     ```
 
-3.  **Set up the Telegram Bot Token and Admin ID:**
-    -   Open `main.py`.
+3.  **Set up Environment Variables:**
+    -   Create a `.env` file in the root directory.
+    -   Add the following lines to the `.env` file:
+        ```
+        BOT_TOKEN="YOUR_TELEGRAM_BOT_TOKEN"
+        ADMIN_ID="YOUR_TELEGRAM_USER_ID"
+        ```
     -   Replace `"YOUR_TELEGRAM_BOT_TOKEN"` with your actual Telegram Bot Token.
-    -   Replace `123456789` in `ADMIN_ID = 123456789` with your Telegram User ID.
+    -   Replace `"YOUR_TELEGRAM_USER_ID"` with your Telegram User ID.
 
 4.  **Run the bot:**
     ```bash
