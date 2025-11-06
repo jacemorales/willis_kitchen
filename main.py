@@ -171,8 +171,11 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
     summary += f"Delivery time: {order['delivery_time']}\n\n"
     summary += "Thank you for ordering from Willis Kitchen!"
 
-    await query.edit_message_text(summary)
-    return await start(update, context)
+    keyboard = [[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(summary, reply_markup=reply_markup)
+    return ConversationHandler.END
 
 
 async def notify_workers(context: CallbackContext, order_id: int):
@@ -547,7 +550,6 @@ def indomie_mixings_keyboard():
             InlineKeyboardButton("None", callback_data="none_mixings"),
         ],
         [
-            InlineKeyboardButton("Next ➡️", callback_data="next_toppings"),
             InlineKeyboardButton("Done ✅", callback_data="next_toppings"),
         ],
     ]
@@ -795,7 +797,7 @@ def custard_additions_keyboard():
             InlineKeyboardButton("None", callback_data="none_additions"),
         ],
         [
-            InlineKeyboardButton("Back ⬅️", callback_data="back_to_mixings"),
+            InlineKeyboardButton("Back ⬅️", callback_data="back_to_custard_quantity"),
             InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
         ],
     ]
@@ -879,9 +881,21 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         summary += f"Service Charge - ₦{order['service_charge']}\n"
     else:
         for item, quantity in order["quantities"].items():
-            if (item == "Indomie" and order.get("source_indomie") == "own_indomie") or \
-               (item == "Custard" and order.get("source_custard") == "own_custard"):
-                price = 0
+            price = 0
+            if item == "Indomie":
+                if order.get("source_indomie") == "own_indomie":
+                    price = 300 * quantity
+                    summary += f"Indomie (user's own) - Service ₦{price}\n"
+                else:
+                    price = 700 * quantity
+                    summary += f"Indomie (from kitchen) - ₦{price}\n"
+            elif item == "Custard":
+                if order.get("source_custard") == "own_custard":
+                    price = 300 * quantity
+                    summary += f"Custard (user's own) - Service ₦{price}\n"
+                else:
+                    price = 700 * quantity
+                    summary += f"Custard (from kitchen) - ₦{price}\n"
             elif item == "Suya":
                 price = quantity
                 summary += f"Suya (₦{quantity})\n"
@@ -943,8 +957,11 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
     summary += f"Delivery time: {order['delivery_time']}\n\n"
     summary += "Thank you for ordering from Willis Kitchen!"
 
-    await query.edit_message_text(summary)
-    return await start(update, context)
+    keyboard = [[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(summary, reply_markup=reply_markup)
+    return ConversationHandler.END
 
 
 async def view_bill(update: Update, context: CallbackContext) -> int:
@@ -975,10 +992,21 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         bill += f"Service Charge - ₦{order['service_charge']}\n"
     else:
         for item, quantity in order["quantities"].items():
-            if (item == "Indomie" and order.get("source_indomie") == "own_indomie") or \
-               (item == "Custard" and order.get("source_custard") == "own_custard"):
-                price = 0
-                bill += f"{item} ({quantity} × ₦0) = ₦0\n"
+            price = 0
+            if item == "Indomie":
+                if order.get("source_indomie") == "own_indomie":
+                    price = 300 * quantity
+                    bill += f"Indomie (user's own) - Service ({quantity} × ₦300) = ₦{price}\n"
+                else:
+                    price = 700 * quantity
+                    bill += f"Indomie (from kitchen) ({quantity} × ₦700) = ₦{price}\n"
+            elif item == "Custard":
+                if order.get("source_custard") == "own_custard":
+                    price = 300 * quantity
+                    bill += f"Custard (user's own) - Service ({quantity} × ₦300) = ₦{price}\n"
+                else:
+                    price = 700 * quantity
+                    bill += f"Custard (from kitchen) ({quantity} × ₦700) = ₦{price}\n"
             elif item == "Suya":
                 price = quantity
                 bill += f"Suya (₦{quantity})\n"
