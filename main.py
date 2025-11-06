@@ -62,7 +62,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     WORKER_HISTORY,
     GET_ROOM_NUMBER,
     GET_DELIVERY_TIME,
-) = range(23)
+) = range(26)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
