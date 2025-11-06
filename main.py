@@ -118,7 +118,7 @@ async def cafe_order(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("Invalid format. Please use 'Item, Quantity, Amount'.")
         return CAFE_ORDER
 
-    service_charge = (price // 500) * 100 if price % 500 != 0 else ((price // 500) - 1) * 100
+    service_charge = ((price - 1) // 500 + 1) * 100
     total = price + service_charge
 
     context.user_data["order"] = {
@@ -293,6 +293,21 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
 
     # Clean up the application data
     del context.bot_data[f"worker_application_{user_id}"]
+
+
+async def back_to_kitchen_menu(update: Update, context: CallbackContext) -> int:
+    """Returns to the kitchen menu."""
+    return await kitchen_menu(update, context)
+
+
+async def back_to_mixings(update: Update, context: CallbackContext) -> int:
+    """Returns to the mixings menu."""
+    return await indomie_mixings(update, context)
+
+
+async def back_to_custard_quantity(update: Update, context: CallbackContext) -> int:
+    """Returns to the custard quantity prompt."""
+    return await custard_start(update, context)
 
 
 async def ask_for_room_number(update: Update, context: CallbackContext) -> int:
@@ -944,7 +959,7 @@ async def send_daily_messages(bot):
             logger.error(f"Failed to send daily message to user {user_id}: {e}")
 
 
-async def main() -> None:
+def main() -> None:
     """Start the bot."""
     # Initialize the database
     init_db()
@@ -973,12 +988,12 @@ async def main() -> None:
             INDOMIE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_quantity)],
             INDOMIE_MIXINGS: [
                 CallbackQueryHandler(indomie_mixings, pattern="^(vegetables|suya|none_mixings|next_toppings)$"),
-                CallbackQueryHandler(kitchen_menu, pattern="^back_to_kitchen_menu$"),
+                CallbackQueryHandler(back_to_kitchen_menu, pattern="^back_to_kitchen_menu$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
             INDOMIE_TOPPINGS: [
                 CallbackQueryHandler(indomie_toppings, pattern="^(egg|sausage|none_toppings|next_quantities)$"),
-                CallbackQueryHandler(indomie_mixings, pattern="^back_to_mixings$"),
+                CallbackQueryHandler(back_to_mixings, pattern="^back_to_mixings$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
             INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_egg_quantity)],
@@ -987,7 +1002,7 @@ async def main() -> None:
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
             CUSTARD_ADDITIONS: [
                 CallbackQueryHandler(custard_additions, pattern="^(sugar|milk|none_additions|next_custard_quantities)$"),
-                CallbackQueryHandler(custard_quantity, pattern="^back_to_custard_quantity$"),
+                CallbackQueryHandler(back_to_custard_quantity, pattern="^back_to_custard_quantity$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
             CUSTARD_SUGAR_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_sugar_quantity)],
@@ -1033,10 +1048,12 @@ async def main() -> None:
     # Scheduler for daily messages
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_daily_messages, 'interval', days=1, args=[application.bot])
+    loop = asyncio.get_event_loop()
+    scheduler.configure(event_loop=loop)
     scheduler.start()
 
     # Start the Bot
-    await application.run_polling()
+    application.run_polling()
 
 
 if __name__ == "__main__":
@@ -1056,4 +1073,4 @@ if __name__ == "__main__":
 
     threading.Thread(target=run_server).start()
 
-    asyncio.run(main())
+    main()
