@@ -23,23 +23,27 @@ def init_db():
             order_date DATETIME NOT NULL,
             source TEXT DEFAULT 'kitchen',
             status TEXT DEFAULT 'pending',
-            taken_by INTEGER
+            taken_by INTEGER,
+            room_number TEXT,
+            delivery_time TEXT,
+            service_charge REAL
         )
     """)
 
     # Add columns to orders table if they don't exist
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'kitchen'")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    try:
-        cursor.execute("ALTER TABLE orders ADD COLUMN taken_by INTEGER")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
+    columns = [
+        ("source", "TEXT DEFAULT 'kitchen'"),
+        ("status", "TEXT DEFAULT 'pending'"),
+        ("taken_by", "INTEGER"),
+        ("room_number", "TEXT"),
+        ("delivery_time", "TEXT"),
+        ("service_charge", "REAL"),
+    ]
+    for column, col_type in columns:
+        try:
+            cursor.execute(f"ALTER TABLE orders ADD COLUMN {column} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     # Create workers table
     cursor.execute("""
@@ -56,15 +60,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_order(user_id, username, food_type, mixings, toppings, quantities, total, source='kitchen'):
+def add_order(user_id, username, food_type, mixings, toppings, quantities, total, source='kitchen', room_number=None, delivery_time=None, service_charge=0):
     """Adds a new order to the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     order_date = datetime.now()
     cursor.execute("""
-        INSERT INTO orders (user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, username, food_type, json.dumps(mixings), json.dumps(toppings), json.dumps(quantities), total, order_date, source, 'pending'))
+        INSERT INTO orders (user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, room_number, delivery_time, service_charge)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, username, food_type, json.dumps(mixings), json.dumps(toppings), json.dumps(quantities), total, order_date, source, 'pending', room_number, delivery_time, service_charge))
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -152,6 +156,15 @@ def get_order_by_id(order_id):
     order = cursor.fetchone()
     conn.close()
     return order
+
+def get_all_unique_users():
+    """Retrieves all unique user IDs from the orders table."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM orders")
+    users = cursor.fetchall()
+    conn.close()
+    return [user[0] for user in users]
 
 
 if __name__ == '__main__':
