@@ -1,11 +1,15 @@
 import logging
 import json
 import os
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 import random
 import asyncio
+import json
+import logging
+import os
+from urllib.parse import quote
+
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,6 +20,7 @@ from telegram.ext import (
     filters,
     CallbackContext,
     CallbackQueryHandler,
+    ContextTypes,
 )
 from database import (
     init_db, add_order, get_user_orders, get_todays_orders, get_all_orders,
@@ -70,7 +75,6 @@ async def start(update: Update, context: CallbackContext) -> int:
     keyboard = [
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
-        [InlineKeyboardButton("💼 Work With Us", callback_data="work_with_us")],
         [InlineKeyboardButton("👀 View My Orders", callback_data="view_orders")],
         [InlineKeyboardButton("🚀 Share Bot", callback_data="share_bot")],
     ]
@@ -315,18 +319,16 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
 
 async def share_command(update: Update, context: CallbackContext) -> None:
     """Sends the share message with share and copy buttons."""
-    share_url_telegram = f"https://t.me/share/url?url={SHARE_MESSAGE}"
-    share_url_whatsapp = f"https://api.whatsapp.com/send?text={SHARE_MESSAGE}"
+    bot_link = f"https://t.me/{context.bot.username}"
+    share_text = quote(SHARE_MESSAGE)
+
+    share_url_telegram = f"https://t.me/share/url?url={bot_link}&text={share_text}"
+    share_url_whatsapp = f"https://api.whatsapp.com/send?text={share_text} {bot_link}"
+
     keyboard = [
-        [
-            InlineKeyboardButton("Share on Telegram 🚀", url=share_url_telegram),
-        ],
-        [
-            InlineKeyboardButton("Share on WhatsApp 🟢", url=share_url_whatsapp),
-        ],
-        [
-            InlineKeyboardButton("Copy Link 📋", callback_data="copy_share_message"),
-        ]
+        [InlineKeyboardButton("Share on Telegram 🚀", url=share_url_telegram)],
+        [InlineKeyboardButton("Share on WhatsApp 🟢", url=share_url_whatsapp)],
+        [InlineKeyboardButton("Copy Message 📋", callback_data="copy_share_message")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -336,11 +338,10 @@ async def share_command(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text(SHARE_MESSAGE, reply_markup=reply_markup)
 
 
-async def copy_share_message_callback(update: Update, context: CallbackContext) -> None:
-    """Sends the share message in a pre-formatted text block for easy copying."""
+async def copy_share_message_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Answers the callback query with a confirmation."""
     query = update.callback_query
-    await query.answer()
-    await query.message.reply_text(f"```\n{SHARE_MESSAGE}\n```", parse_mode="MarkdownV2")
+    await query.answer("Copied ✅", show_alert=True)
 
 
 async def back_to_kitchen_menu(update: Update, context: CallbackContext) -> int:
@@ -881,27 +882,23 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         summary += f"Service Charge - ₦{order['service_charge']}\n"
     else:
         for item, quantity in order["quantities"].items():
+            if item in ["Indomie", "Custard"]:
+                summary += f"{item} x{quantity}\n"
+            elif item != "item" and item != "price":
+                summary += f"{item} ({quantity})\n"
+
+        # Calculate total without showing individual prices
+        total = 0
+        for item, quantity in order["quantities"].items():
             price = 0
             if item == "Indomie":
-                if order.get("source_indomie") == "own_indomie":
-                    price = 300 * quantity
-                    summary += f"Indomie (user's own) - Service ₦{price}\n"
-                else:
-                    price = 700 * quantity
-                    summary += f"Indomie (from kitchen) - ₦{price}\n"
+                price = 300 * quantity if order.get("source_indomie") == "own_indomie" else 700 * quantity
             elif item == "Custard":
-                if order.get("source_custard") == "own_custard":
-                    price = 300 * quantity
-                    summary += f"Custard (user's own) - Service ₦{price}\n"
-                else:
-                    price = 700 * quantity
-                    summary += f"Custard (from kitchen) - ₦{price}\n"
+                price = 300 * quantity if order.get("source_custard") == "own_custard" else 700 * quantity
             elif item == "Suya":
                 price = quantity
-                summary += f"Suya (₦{quantity})\n"
-            else:
+            elif item != "item" and item != "price":
                 price = pricing.get(item, 0) * quantity
-                summary += f"{item} ({quantity})\n"
             total += price
 
 
@@ -1143,7 +1140,7 @@ async def send_daily_messages(bot):
             logger.error(f"Failed to send daily message to user {user_id}: {e}")
 
 
-def main() -> None:
+async def main() -> None:
     """Start the bot."""
     # Initialize the database
     init_db()
@@ -1238,29 +1235,32 @@ def main() -> None:
     # Scheduler for daily messages
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_daily_messages, 'interval', days=1, args=[application.bot])
-    loop = asyncio.get_event_loop()
-    scheduler.configure(event_loop=loop)
-    scheduler.start()
 
-    # Start the Bot
-    application.run_polling()
+    async with application:
+        await application.bot.set_webhook(os.getenv("WEBHOOK_URL"))
+        scheduler.start()
+        await application.start()
+
+        # Webhook server
+        async def telegram_handle(request):
+            await application.update_queue.put(Update.de_json(await request.json(), application.bot))
+            return web.Response()
+
+        async def health_check(_):
+            return web.Response(text="OK")
+
+        app = web.Application()
+        app.router.add_post("/telegram", telegram_handle)
+        app.router.add_get("/", health_check)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+        await site.start()
+
+        # Keep the server running
+        await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    # Keep-alive server for Render
-    class KeepAliveHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b"Bot is running fine!")
-
-    def run_server():
-        port = int(os.environ.get("PORT", 8080))
-        server_address = ('', port)
-        httpd = HTTPServer(server_address, KeepAliveHandler)
-        httpd.serve_forever()
-
-    threading.Thread(target=run_server).start()
-
-    main()
+    asyncio.run(main())

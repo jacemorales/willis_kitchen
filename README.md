@@ -35,7 +35,8 @@ This is a Telegram bot that allows users to order food from Willis Kitchen.
         ```
         BOT_TOKEN="YOUR_TELEGRAM_BOT_TOKEN"
         ADMIN_ID="YOUR_TELEGRAM_USER_ID"
-        PORT="8080"
+        PORT="10000"
+        WEBHOOK_URL="YOUR_WEBHOOK_URL"
         ```
     -   Replace `"YOUR_TELEGRAM_BOT_TOKEN"` with your actual Telegram Bot Token.
     -   Replace `"YOUR_TELEGRAM_USER_ID"` with your Telegram User ID.
