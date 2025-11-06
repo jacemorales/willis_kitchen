@@ -5,6 +5,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 import random
+import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -117,7 +118,7 @@ async def cafe_order(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("Invalid format. Please use 'Item, Quantity, Amount'.")
         return CAFE_ORDER
 
-    service_charge = ((price - 1) // 500 + 1) * 100
+    service_charge = (price // 500) * 100 if price % 500 != 0 else ((price // 500) - 1) * 100
     total = price + service_charge
 
     context.user_data["order"] = {
@@ -166,7 +167,7 @@ async def notify_workers(context: CallbackContext, order_id: int):
     if not order:
         return
 
-    _, _, username, food_type, _, _, _, total, _, source, _, _ = order
+    _, _, username, food_type, _, _, _, total, _, source, _, _, _, _, _ = order
 
     message = (
         f"📦 New Order Available:\n"
@@ -344,7 +345,7 @@ async def view_worker_orders(update: Update, context: CallbackContext) -> int:
 
     message = f"📦 Your {status.capitalize()} Orders:\n"
     for order in orders:
-        _, _, _, food_type, _, _, _, total, order_date, _, _, _ = order
+        _, _, _, food_type, _, _, _, total, order_date, _, _, _, _, _, _ = order
         message += f"📅 {order_date} - {food_type} - ₦{total}\n"
 
     await query.edit_message_text(message)
@@ -405,7 +406,6 @@ async def indomie_quantity(update: Update, context: CallbackContext) -> int:
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_kitchen_menu"),
-            InlineKeyboardButton("Done ✅", callback_data="next_toppings"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -468,7 +468,6 @@ async def indomie_toppings_menu(update: Update, context: CallbackContext) -> int
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_mixings"),
-            InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -598,7 +597,6 @@ async def custard_quantity(update: Update, context: CallbackContext) -> int:
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_custard_quantity"),
-            InlineKeyboardButton("Done ✅", callback_data="next_custard_quantities"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -772,6 +770,8 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
         toppings=order.get("toppings"),
         quantities=order["quantities"],
         total=order["total"],
+        room_number=order.get("room_number"),
+        delivery_time=order.get("delivery_time"),
     )
 
     # Notify workers
@@ -846,7 +846,7 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
     message = "📦 Your Orders:\n"
     total_spent = 0
     for i, order in enumerate(orders):
-        _, _, _, food_type, _, _, quantities, total, order_date, _, _, _ = order
+        _, _, _, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
         quantities = json.loads(quantities)
 
         if food_type == 'Indomie' or food_type == 'Custard':
@@ -896,7 +896,7 @@ async def view_today_orders(update: Update, context: CallbackContext) -> int:
 
     message = "📅 Today's Orders:\n"
     for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _ = order
+        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
         quantities = json.loads(quantities)
 
         if food_type == 'Indomie' or food_type == 'Custard':
@@ -920,7 +920,7 @@ async def view_all_orders(update: Update, context: CallbackContext) -> int:
 
     message = "📦 All Orders (sorted by date):\n"
     for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _ = order
+        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
         quantities = json.loads(quantities)
 
         if food_type == 'Indomie' or food_type == 'Custard':
@@ -944,26 +944,10 @@ async def send_daily_messages(bot):
             logger.error(f"Failed to send daily message to user {user_id}: {e}")
 
 
-def main() -> None:
+async def main() -> None:
     """Start the bot."""
     # Initialize the database
     init_db()
-
-    # Keep-alive server for Render
-    class KeepAliveHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b"Bot is running fine!")
-
-    def run_server():
-        port = int(os.environ.get("PORT", 8080))
-        server_address = ('', port)
-        httpd = HTTPServer(server_address, KeepAliveHandler)
-        httpd.serve_forever()
-
-    threading.Thread(target=run_server).start()
 
     application = Application.builder().token(TOKEN).build()
 
@@ -1052,8 +1036,24 @@ def main() -> None:
     scheduler.start()
 
     # Start the Bot
-    application.run_polling()
+    await application.run_polling()
 
 
 if __name__ == "__main__":
-    main()
+    # Keep-alive server for Render
+    class KeepAliveHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Bot is running fine!")
+
+    def run_server():
+        port = int(os.environ.get("PORT", 8080))
+        server_address = ('', port)
+        httpd = HTTPServer(server_address, KeepAliveHandler)
+        httpd.serve_forever()
+
+    threading.Thread(target=run_server).start()
+
+    asyncio.run(main())
