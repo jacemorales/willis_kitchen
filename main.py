@@ -72,6 +72,7 @@ async def start(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
         [InlineKeyboardButton("💼 Work With Us", callback_data="work_with_us")],
         [InlineKeyboardButton("👀 View My Orders", callback_data="view_orders")],
+        [InlineKeyboardButton("🚀 Share Bot", callback_data="share_bot")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     welcome_text = "Welcome to Willis Kitchen 🍽️\nWhere would you like to order from?"
@@ -160,7 +161,17 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
     # Notify workers
     await notify_workers(context, order_id)
 
-    await query.edit_message_text("Your café order has been placed successfully! 🎉")
+    summary = "✅ Your order has been successfully placed!\n\n"
+    summary += "Here’s your order summary:\n"
+    summary += f"• {order['food']} x{order['quantities']['quantity']}\n"
+    summary += f"Amount: ₦{order['quantities']['price']}\n"
+    summary += f"Service Charge: ₦{order['service_charge']}\n"
+    summary += f"Total: ₦{order['total']}\n\n"
+    summary += f"Delivery to: {order['hall_and_room_number']}\n"
+    summary += f"Delivery time: {order['delivery_time']}\n\n"
+    summary += "Thank you for ordering from Willis Kitchen!"
+
+    await query.edit_message_text(summary)
     return await start(update, context)
 
 
@@ -301,15 +312,25 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
 
 async def share_command(update: Update, context: CallbackContext) -> None:
     """Sends the share message with share and copy buttons."""
-    share_url = f"https://t.me/share/url?url={SHARE_MESSAGE}"
+    share_url_telegram = f"https://t.me/share/url?url={SHARE_MESSAGE}"
+    share_url_whatsapp = f"https://api.whatsapp.com/send?text={SHARE_MESSAGE}"
     keyboard = [
         [
-            InlineKeyboardButton("Share 🚀", url=share_url),
-            InlineKeyboardButton("Copy 📋", callback_data="copy_share_message"),
+            InlineKeyboardButton("Share on Telegram 🚀", url=share_url_telegram),
+        ],
+        [
+            InlineKeyboardButton("Share on WhatsApp 🟢", url=share_url_whatsapp),
+        ],
+        [
+            InlineKeyboardButton("Copy Link 📋", callback_data="copy_share_message"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(SHARE_MESSAGE, reply_markup=reply_markup)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(SHARE_MESSAGE, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(SHARE_MESSAGE, reply_markup=reply_markup)
 
 
 async def copy_share_message_callback(update: Update, context: CallbackContext) -> None:
@@ -336,16 +357,21 @@ async def back_to_custard_quantity(update: Update, context: CallbackContext) -> 
 
 async def ask_for_hall_and_room_number(update: Update, context: CallbackContext) -> int:
     """Asks for the user's hall and room number."""
+    prompt = "Please enter your hall and room number (e.g., Peter Hall B204):"
     if update.callback_query:
-        await update.callback_query.edit_message_text("Please enter your Hall and Room Number for delivery:")
+        await update.callback_query.edit_message_text(prompt)
     else:
-        await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
+        await update.message.reply_text(prompt)
     return GET_ROOM_NUMBER
 
 
 async def get_hall_and_room_number(update: Update, context: CallbackContext) -> int:
     """Stores the hall and room number and asks for the delivery time."""
-    context.user_data["order"]["hall_and_room_number"] = update.message.text
+    hall_and_room_number = update.message.text
+    if not hall_and_room_number:
+        await update.message.reply_text("Hall and room number cannot be empty. Please try again.")
+        return GET_ROOM_NUMBER
+    context.user_data["order"]["hall_and_room_number"] = hall_and_room_number
     await update.message.reply_text("What time would you like your order to be delivered?")
     return GET_DELIVERY_TIME
 
@@ -582,7 +608,8 @@ def indomie_toppings_keyboard():
             InlineKeyboardButton("None", callback_data="none_toppings"),
         ],
         [
-            InlineKeyboardButton("Next ➡️", callback_data="next_quantities"),
+            InlineKeyboardButton("Back ⬅️", callback_data="back_to_kitchen_menu"),
+            InlineKeyboardButton("Done ✅", callback_data="next_toppings"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -591,20 +618,17 @@ def indomie_toppings_keyboard():
 async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
     """Asks for quantities of selected items."""
     order = context.user_data["order"]
-    if "egg" in order["toppings"]:
-        await update.callback_query.edit_message_text("How many eggs would you like?")
-        return INDOMIE_EGG_QUANTITY
-    elif "sausage" in order["toppings"]:
-        await update.callback_query.edit_message_text("How many sausages would you like?")
-        return INDOMIE_SAUSAGE_QUANTITY
-    elif "sardine" in order["mixings"]:
+    if "vegetables" in order["mixings"]:
+        # No quantity for vegetables
+        pass
+    if "sardine" in order["mixings"]:
         await update.callback_query.edit_message_text("How many sardines would you like?")
         return INDOMIE_SARDINE_QUANTITY
     elif "suya" in order["mixings"]:
         await update.callback_query.edit_message_text("Enter the amount for suya (₦):")
         return INDOMIE_SUYA_AMOUNT
     else:
-        return await ask_for_room_number(update, context)
+        return await ask_for_topping_quantities(update, context)
 
 
 async def indomie_egg_quantity(update: Update, context: CallbackContext) -> int:
@@ -645,16 +669,37 @@ async def indomie_sardine_quantity(update: Update, context: CallbackContext) -> 
         await update.message.reply_text("Enter the amount for suya (₦):")
         return INDOMIE_SUYA_AMOUNT
     else:
-        await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
-        return GET_ROOM_NUMBER
+        return await ask_for_topping_quantities(update, context)
+
+
+async def ask_for_topping_quantities(update: Update, context: CallbackContext) -> int:
+    """Asks for quantities of selected toppings."""
+    order = context.user_data["order"]
+    if "egg" in order["toppings"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many eggs would you like?")
+        else:
+            await update.message.reply_text("How many eggs would you like?")
+        return INDOMIE_EGG_QUANTITY
+    elif "sausage" in order["toppings"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many sausages would you like?")
+        else:
+            await update.message.reply_text("How many sausages would you like?")
+        return INDOMIE_SAUSAGE_QUANTITY
+    else:
+        if update.callback_query:
+            return await ask_for_hall_and_room_number(update, context)
+        else:
+            await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
+            return GET_ROOM_NUMBER
 
 
 async def indomie_suya_amount(update: Update, context: CallbackContext) -> int:
-    """Stores the amount for suya."""
+    """Stores the amount for suya and proceeds to ask for topping quantities."""
     amount = int(update.message.text)
     context.user_data["order"]["quantities"]["Suya"] = amount
-    await update.message.reply_text("Please enter your room number for delivery:")
-    return GET_ROOM_NUMBER
+    return await ask_for_topping_quantities(update, context)
 
 
 async def custard_start(update: Update, context: CallbackContext) -> int:
@@ -682,6 +727,7 @@ async def custard_quantity(update: Update, context: CallbackContext) -> int:
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_custard_quantity"),
+            InlineKeyboardButton("Done ✅", callback_data="next_custard_quantities"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -749,7 +795,8 @@ def custard_additions_keyboard():
             InlineKeyboardButton("None", callback_data="none_additions"),
         ],
         [
-            InlineKeyboardButton("Next ➡️", callback_data="next_custard_quantities"),
+            InlineKeyboardButton("Back ⬅️", callback_data="back_to_mixings"),
+            InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -887,7 +934,16 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
     # Notify workers
     await notify_workers(context, order_id)
 
-    await query.edit_message_text("Your order has been placed successfully! 🎉")
+    summary = "✅ Your order has been successfully placed!\n\n"
+    summary += "Here’s your order summary:\n"
+    for item, quantity in order["quantities"].items():
+        summary += f"• {item} x{quantity}\n"
+    summary += f"Total: ₦{order['total']}\n\n"
+    summary += f"Delivery to: {order['hall_and_room_number']}\n"
+    summary += f"Delivery time: {order['delivery_time']}\n\n"
+    summary += "Thank you for ordering from Willis Kitchen!"
+
+    await query.edit_message_text(summary)
     return await start(update, context)
 
 
@@ -1078,6 +1134,7 @@ def main() -> None:
                 CallbackQueryHandler(cafe_menu, pattern="^cafe_menu$"),
                 CallbackQueryHandler(work_with_us, pattern="^work_with_us$"),
                 CallbackQueryHandler(view_orders, pattern="^view_orders$"),
+                CallbackQueryHandler(share_command, pattern="^share_bot$"),
             ],
             KITCHEN_MENU: [
                 CallbackQueryHandler(indomie_start, pattern="^indomie$"),
