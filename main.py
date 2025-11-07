@@ -1238,7 +1238,8 @@ async def main() -> None:
     scheduler.add_job(send_daily_messages, 'interval', days=1, args=[application.bot])
 
     async with application:
-        await application.bot.set_webhook(os.getenv("WEBHOOK_URL"))
+        webhook_url = f"{os.getenv('WEBHOOK_URL')}/{TOKEN}"
+        await application.bot.set_webhook(webhook_url)
         scheduler.start()
         await application.start()
 
