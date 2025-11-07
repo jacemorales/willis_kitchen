@@ -790,7 +790,7 @@ def custard_additions_keyboard():
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_custard_quantity"),
-            InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
+            InlineKeyboardButton("Done ✅", callback_data="next_custard_quantities"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -799,14 +799,26 @@ def custard_additions_keyboard():
 async def ask_for_custard_quantities(update: Update, context: CallbackContext) -> int:
     """Asks for quantities of selected items."""
     order = context.user_data["order"]
-    if "sugar" in order["additions"]:
-        await update.callback_query.edit_message_text("How many spoons of sugar would you like?")
+
+    if "sugar" in order["additions"] and "Sugar" not in order["quantities"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many spoons of sugar would you like?")
+        else:
+            await update.message.reply_text("How many spoons of sugar would you like?")
         return CUSTARD_SUGAR_QUANTITY
-    elif "milk" in order["additions"]:
-        await update.callback_query.edit_message_text("How many sachets of milk would you like?")
+
+    if "milk" in order["additions"] and "Milk" not in order["quantities"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many sachets of milk would you like?")
+        else:
+            await update.message.reply_text("How many sachets of milk would you like?")
         return CUSTARD_MILK_QUANTITY
+
+    if update.callback_query:
+        return await ask_for_hall_and_room_number(update, context)
     else:
-        return await ask_for_room_number(update, context)
+        await update.message.reply_text("Please enter your hall and room number (e.g., Peter Hall B204):")
+        return GET_ROOM_NUMBER
 
 
 async def custard_sugar_quantity(update: Update, context: CallbackContext) -> int:
@@ -827,9 +839,12 @@ async def spaghetti_start(update: Update, context: CallbackContext) -> int:
     """Handles the Spaghetti option."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Please contact customer care for more info 📞")
-    # Return to the main menu
-    return await start(update, context)
+    keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="back_to_kitchen_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        "Please contact customer care for more info 📞", reply_markup=reply_markup
+    )
+    return KITCHEN_MENU
 
 
 async def cancel(update: Update, context: CallbackContext) -> int:
@@ -972,28 +987,30 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         bill += f"{quantities['item']} ({quantities['quantity']}) - ₦{price}\n"
         bill += f"Service Charge - ₦{order['service_charge']}\n"
     else:
+        # Calculate total for kitchen orders
+        total = 0
         for item, quantity in order["quantities"].items():
             price = 0
             if item == "Indomie":
                 if order.get("source_indomie") == "own_indomie":
                     price = 300 * quantity
-                    bill += f"Indomie (user's own) - Service ({quantity} × ₦300) = ₦{price}\n"
+                    bill += f"Indomie (user's own) - Service: ₦{price}\n"
                 else:
                     price = 700 * quantity
-                    bill += f"Indomie (from kitchen) ({quantity} × ₦700) = ₦{price}\n"
+                    bill += f"Indomie (from kitchen): ₦{price}\n"
             elif item == "Custard":
                 if order.get("source_custard") == "own_custard":
                     price = 300 * quantity
-                    bill += f"Custard (user's own) - Service ({quantity} × ₦300) = ₦{price}\n"
+                    bill += f"Custard (user's own) - Service: ₦{price}\n"
                 else:
                     price = 700 * quantity
-                    bill += f"Custard (from kitchen) ({quantity} × ₦700) = ₦{price}\n"
+                    bill += f"Custard (from kitchen): ₦{price}\n"
             elif item == "Suya":
                 price = quantity
-                bill += f"Suya (₦{quantity})\n"
-            else:
+                bill += f"Suya: ₦{quantity}\n"
+            elif item in pricing:
                 price = pricing[item] * quantity
-                bill += f"{item} ({quantity} × ₦{pricing[item]}) = ₦{price}\n"
+                bill += f"{item}: ₦{price}\n"
             total += price
 
 
@@ -1150,6 +1167,7 @@ async def main() -> None:
                 CallbackQueryHandler(custard_start, pattern="^custard$"),
                 CallbackQueryHandler(spaghetti_start, pattern="^spaghetti$"),
                 CallbackQueryHandler(start, pattern="^main_menu$"),
+                CallbackQueryHandler(kitchen_menu, pattern="^back_to_kitchen_menu$"),
             ],
             INDOMIE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_quantity)],
             INDOMIE_MIXINGS: [
