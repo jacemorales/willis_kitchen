@@ -138,8 +138,8 @@ async def cafe_order(update: Update, context: CallbackContext) -> int:
         "source": "cafe",
     }
 
-    # Ask for room number
-    await update.message.reply_text("Please enter your room number for delivery:")
+    # Ask for hall and room number
+    await update.message.reply_text("Please enter your hall and room number (e.g., Peter Hall B204):")
     return GET_ROOM_NUMBER
 
 
@@ -621,88 +621,79 @@ def indomie_toppings_keyboard():
 async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
     """Asks for quantities of selected items."""
     order = context.user_data["order"]
-    if "vegetables" in order["mixings"]:
-        # No quantity for vegetables
-        pass
-    if "sardine" in order["mixings"]:
-        await update.callback_query.edit_message_text("How many sardines would you like?")
+
+    # Mixings
+    if "vegetables" in order["mixings"] and "vegetables" not in order["quantities"]:
+        order["quantities"]["vegetables"] = 1 # Default quantity
+
+    if "sardine" in order["mixings"] and "Sardine" not in order["quantities"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many sardines would you like?")
+        else:
+            await update.message.reply_text("How many sardines would you like?")
         return INDOMIE_SARDINE_QUANTITY
-    elif "suya" in order["mixings"]:
-        await update.callback_query.edit_message_text("Enter the amount for suya (₦):")
+
+    if "suya" in order["mixings"] and "Suya" not in order["quantities"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("Enter the amount for suya (₦):")
+        else:
+            await update.message.reply_text("Enter the amount for suya (₦):")
         return INDOMIE_SUYA_AMOUNT
-    else:
-        return await ask_for_topping_quantities(update, context)
+
+    return await ask_for_topping_quantities(update, context)
 
 
 async def indomie_egg_quantity(update: Update, context: CallbackContext) -> int:
     """Stores the quantity of eggs."""
     quantity = int(update.message.text)
     context.user_data["order"]["quantities"]["Egg"] = quantity
-    order = context.user_data["order"]
-    if "sausage" in order["toppings"]:
-        await update.message.reply_text("How many sausages would you like?")
-        return INDOMIE_SAUSAGE_QUANTITY
-    elif "suya" in order["mixings"]:
-        await update.message.reply_text("Enter the amount for suya (₦):")
-        return INDOMIE_SUYA_AMOUNT
-    else:
-        await update.message.reply_text("Please enter your room number for delivery:")
-        return GET_ROOM_NUMBER
+    return await ask_for_topping_quantities(update, context)
 
 
 async def indomie_sausage_quantity(update: Update, context: CallbackContext) -> int:
     """Stores the quantity of sausages."""
     quantity = int(update.message.text)
     context.user_data["order"]["quantities"]["Sausage"] = quantity
-    order = context.user_data["order"]
-    if "suya" in order["mixings"]:
-        await update.message.reply_text("Enter the amount for suya (₦):")
-        return INDOMIE_SUYA_AMOUNT
-    else:
-        await update.message.reply_text("Please enter your room number for delivery:")
-        return GET_ROOM_NUMBER
+    return await ask_for_topping_quantities(update, context)
 
 
 async def indomie_sardine_quantity(update: Update, context: CallbackContext) -> int:
     """Stores the quantity of sardines."""
     quantity = int(update.message.text)
     context.user_data["order"]["quantities"]["Sardine"] = quantity
-    order = context.user_data["order"]
-    if "suya" in order["mixings"]:
-        await update.message.reply_text("Enter the amount for suya (₦):")
-        return INDOMIE_SUYA_AMOUNT
-    else:
-        return await ask_for_topping_quantities(update, context)
+    return await ask_for_quantities(update, context)
 
 
 async def ask_for_topping_quantities(update: Update, context: CallbackContext) -> int:
     """Asks for quantities of selected toppings."""
     order = context.user_data["order"]
-    if "egg" in order["toppings"]:
+
+    if "egg" in order["toppings"] and "Egg" not in order["quantities"]:
         if update.callback_query:
             await update.callback_query.edit_message_text("How many eggs would you like?")
         else:
             await update.message.reply_text("How many eggs would you like?")
         return INDOMIE_EGG_QUANTITY
-    elif "sausage" in order["toppings"]:
+
+    if "sausage" in order["toppings"] and "Sausage" not in order["quantities"]:
         if update.callback_query:
             await update.callback_query.edit_message_text("How many sausages would you like?")
         else:
             await update.message.reply_text("How many sausages would you like?")
         return INDOMIE_SAUSAGE_QUANTITY
+
+    if update.callback_query:
+        return await ask_for_hall_and_room_number(update, context)
     else:
-        if update.callback_query:
-            return await ask_for_hall_and_room_number(update, context)
-        else:
-            await update.message.reply_text("Please enter your Hall and Room Number for delivery:")
-            return GET_ROOM_NUMBER
+        await update.message.reply_text("Please enter your hall and room number (e.g., Peter Hall B204):")
+        return GET_ROOM_NUMBER
 
 
 async def indomie_suya_amount(update: Update, context: CallbackContext) -> int:
     """Stores the amount for suya and proceeds to ask for topping quantities."""
     amount = int(update.message.text)
     context.user_data["order"]["quantities"]["Suya"] = amount
-    return await ask_for_topping_quantities(update, context)
+    return await ask_for_quantities(update, context)
 
 
 async def custard_start(update: Update, context: CallbackContext) -> int:
@@ -822,21 +813,14 @@ async def custard_sugar_quantity(update: Update, context: CallbackContext) -> in
     """Stores the quantity of sugar."""
     quantity = int(update.message.text)
     context.user_data["order"]["quantities"]["Sugar"] = quantity
-    order = context.user_data["order"]
-    if "milk" in order["additions"]:
-        await update.message.reply_text("How many sachets of milk would you like?")
-        return CUSTARD_MILK_QUANTITY
-    else:
-        await update.message.reply_text("Please enter your room number for delivery:")
-        return GET_ROOM_NUMBER
+    return await ask_for_custard_quantities(update, context)
 
 
 async def custard_milk_quantity(update: Update, context: CallbackContext) -> int:
     """Stores the quantity of milk."""
     quantity = int(update.message.text)
     context.user_data["order"]["quantities"]["Milk"] = quantity
-    await update.message.reply_text("Please enter your room number for delivery:")
-    return GET_ROOM_NUMBER
+    return await ask_for_custard_quantities(update, context)
 
 
 async def spaghetti_start(update: Update, context: CallbackContext) -> int:
@@ -1238,13 +1222,15 @@ async def main() -> None:
     scheduler.add_job(send_daily_messages, 'interval', days=1, args=[application.bot])
 
     async with application:
-        webhook_url = f"{os.getenv('WEBHOOK_URL')}/{TOKEN}"
+        webhook_url = os.getenv("WEBHOOK_URL")
         await application.bot.set_webhook(webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
         scheduler.start()
         await application.start()
 
         # Webhook server
         async def telegram_handle(request):
+            logger.info("Received a POST request from Telegram.")
             await application.update_queue.put(Update.de_json(await request.json(), application.bot))
             return web.Response()
 
@@ -1252,7 +1238,7 @@ async def main() -> None:
             return web.Response(text="OK")
 
         app = web.Application()
-        app.router.add_post(f"/{TOKEN}", telegram_handle)
+        app.router.add_post("/", telegram_handle)
         app.router.add_get("/", health_check)
 
         runner = web.AppRunner(app)
