@@ -612,7 +612,7 @@ def indomie_toppings_keyboard():
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_kitchen_menu"),
-            InlineKeyboardButton("Done ✅", callback_data="next_toppings"),
+            InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -1231,6 +1231,7 @@ async def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"))
     application.add_handler(CallbackQueryHandler(take_order, pattern="^take_"))
     application.add_handler(CallbackQueryHandler(copy_share_message_callback, pattern="^copy_share_message$"))
+    application.add_handler(CallbackQueryHandler(start, pattern="^main_menu$"))
 
     # Scheduler for daily messages
     scheduler = AsyncIOScheduler()
@@ -1250,7 +1251,7 @@ async def main() -> None:
             return web.Response(text="OK")
 
         app = web.Application()
-        app.router.add_post("/telegram", telegram_handle)
+        app.router.add_post(f"/{TOKEN}", telegram_handle)
         app.router.add_get("/", health_check)
 
         runner = web.AppRunner(app)
