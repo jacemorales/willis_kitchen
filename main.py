@@ -25,7 +25,9 @@ from telegram.ext import (
 from database import (
     init_db, add_order, get_user_orders, get_todays_orders, get_all_orders,
     add_worker, get_all_workers, is_worker, update_order_status,
-    get_worker_orders, get_order_by_id, get_all_unique_users
+    get_worker_orders, get_order_by_id, get_all_unique_users,
+    add_worker_application, get_worker_applications, update_worker_application_status,
+    get_all_payments
 )
 from messages import DAILY_MESSAGES, SHARE_MESSAGE
 
@@ -48,6 +50,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_TOPPINGS,
     INDOMIE_EGG_QUANTITY,
     INDOMIE_SAUSAGE_QUANTITY,
+    INDOMIE_VEGETABLES_QUANTITY,
     INDOMIE_SUYA_AMOUNT,
     INDOMIE_SARDINE_QUANTITY,
     INDOMIE_SOURCE,
@@ -67,7 +70,11 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     WORKER_HISTORY,
     GET_ROOM_NUMBER,
     GET_DELIVERY_TIME,
-) = range(26)
+    GET_PAYMENT_SCREENSHOT,
+    INDOMIE_SPICE,
+    INDOMIE_BEVERAGES,
+    INDOMIE_BEVERAGE_QUANTITY,
+) = range(31)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -108,37 +115,52 @@ async def cafe_menu(update: Update, context: CallbackContext) -> int:
     """Asks for the cafe order."""
     query = update.callback_query
     await query.answer()
+    context.user_data['cafe_items'] = []
     await query.edit_message_text(
-        "Please include the item, quantity, and total amount to be spent on the item.\n\n"
-        "Example: Meat Pie, 2, 1600"
+        "Please send each item you want to order in the format: `Item, Quantity, Total Price`.\n\n"
+        "Example: `Meat Pie, 2, 1600`\n\n"
+        "Send `/done` when you have added all your items."
     )
     return CAFE_ORDER
 
 
 async def cafe_order(update: Update, context: CallbackContext) -> int:
-    """Parses the cafe order, calculates the total, and asks for room number."""
+    """Parses a single cafe item and adds it to the list."""
     order_text = update.message.text
     try:
         parts = order_text.split(",")
-        item = parts[0].strip()
+        item_name = parts[0].strip()
         quantity = int(parts[1].strip())
         price = int("".join(filter(str.isdigit, parts[2])))
     except (ValueError, IndexError):
         await update.message.reply_text("Invalid format. Please use 'Item, Quantity, Amount'.")
         return CAFE_ORDER
 
-    service_charge = ((price - 1) // 500 + 1) * 100
-    total = price + service_charge
+    context.user_data['cafe_items'].append({'item': item_name, 'quantity': quantity, 'price': price})
+
+    await update.message.reply_text(f"Added: {item_name}. Add another item or send /done.")
+    return CAFE_ORDER
+
+
+async def cafe_order_done(update: Update, context: CallbackContext) -> int:
+    """Finalizes the multi-item cafe order."""
+    items = context.user_data.get('cafe_items', [])
+    if not items:
+        await update.message.reply_text("You haven't added any items yet.")
+        return CAFE_ORDER
+
+    total_price = sum(item['price'] for item in items)
+    service_charge = ((total_price - 1) // 500 + 1) * 100
+    total = total_price + service_charge
 
     context.user_data["order"] = {
-        "food": item,
-        "quantities": {"item": item, "quantity": quantity, "price": price},
+        "food": "Cafe Order",
+        "quantities": items,
         "service_charge": service_charge,
         "total": total,
         "source": "cafe",
     }
 
-    # Ask for hall and room number
     await update.message.reply_text("Please enter your hall and room number (e.g., Peter Hall B204):")
     return GET_ROOM_NUMBER
 
@@ -244,30 +266,31 @@ async def worker_matric_no(update: Update, context: CallbackContext) -> int:
 
 
 async def worker_phone(update: Update, context: CallbackContext) -> int:
-    """Stores the worker's phone number, sends the application to the admin, and notifies the user."""
+    """Stores the worker's phone number, saves the application, and notifies the admin."""
     context.user_data["worker_application"]["phone"] = update.message.text
 
     application_data = context.user_data["worker_application"]
     user = update.effective_user
 
+    # Save application to the database
+    add_worker_application(
+        user_id=user.id,
+        username=user.username,
+        name=application_data['name'],
+        reg_no=application_data['reg_no'],
+        matric_no=application_data['matric_no'],
+        phone=application_data['phone']
+    )
+
     # Notify admin
     admin_message = (
         f"🧑‍🍳 New Waiter Application:\n"
         f"Name: {application_data['name']}\n"
-        f"Reg No: {application_data['reg_no']}\n"
-        f"Matric No: {application_data['matric_no']}\n"
+        f"User: @{user.username}\n"
         f"Phone: {application_data['phone']}\n\n"
-        f"Approve this worker?"
+        "You can approve or reject this from the /admin panel."
     )
-
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user.id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message, reply_markup=reply_markup)
+    await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message)
 
     # Notify user
     await update.message.reply_text(
@@ -275,46 +298,48 @@ async def worker_phone(update: Update, context: CallbackContext) -> int:
         "Your request is being processed."
     )
 
-    context.bot_data[f"worker_application_{user.id}"] = application_data
     return ConversationHandler.END
 
 
 async def handle_worker_approval(update: Update, context: CallbackContext) -> None:
-    """Handles the admin's decision on a worker application."""
+    """Handles the admin's decision on a worker application from the admin panel."""
     query = update.callback_query
     await query.answer()
 
-    action, user_id_str = query.data.split("_")
-    user_id = int(user_id_str)
+    action, app_id_str = query.data.split("_")
+    application_id = int(app_id_str)
 
-    application_data = context.bot_data.get(f"worker_application_{user_id}")
+    # Retrieve application from DB
+    apps = get_worker_applications()
+    application_data = next((app for app in apps if app[0] == application_id), None)
 
     if not application_data:
-        await query.edit_message_text("Could not find application data. It might have expired.")
+        await query.edit_message_text("Application not found.")
         return
 
+    user_id = application_data[1]
+
     if action == "approve":
+        update_worker_application_status(application_id, 'approved')
         add_worker(
             user_id=user_id,
-            name=application_data["name"],
-            reg_no=application_data["reg_no"],
-            matric_no=application_data["matric_no"],
-            phone=application_data["phone"],
+            name=application_data[3],
+            reg_no=application_data[4],
+            matric_no=application_data[5],
+            phone=application_data[6],
         )
         await context.bot.send_message(
             chat_id=user_id,
-            text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker. You can now start receiving orders."
+            text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker."
         )
-        await query.edit_message_text("Worker approved.")
-    else:
+        await query.edit_message_text(f"Application {application_id} approved.")
+    else: # Reject
+        update_worker_application_status(application_id, 'rejected')
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ Your application was not approved at this time. Please try again later."
+            text="❌ Your application was not approved at this time."
         )
-        await query.edit_message_text("Worker rejected.")
-
-    # Clean up the application data
-    del context.bot_data[f"worker_application_{user_id}"]
+        await query.edit_message_text(f"Application {application_id} rejected.")
 
 
 async def share_command(update: Update, context: CallbackContext) -> None:
@@ -576,17 +601,31 @@ async def indomie_toppings_menu(update: Update, context: CallbackContext) -> int
     return INDOMIE_TOPPINGS
 
 
+def indomie_spice_menu_keyboard():
+    """Returns the keyboard for the spice menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Pepper (₦50)", callback_data="spice_pepper"),
+            InlineKeyboardButton("Crayfish (₦50)", callback_data="spice_crayfish"),
+            InlineKeyboardButton("None", callback_data="spice_none"),
+        ],
+        [
+            InlineKeyboardButton("Done ✅", callback_data="spice_next"),
+        ],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 async def indomie_toppings(update: Update, context: CallbackContext) -> int:
     """Stores the toppings."""
     query = update.callback_query
     await query.answer()
     topping = query.data
-    if topping == "next_quantities":
-        return await ask_for_quantities(update, context)
+    if topping == "next_spice":
+        return await indomie_spice_menu(update, context)
 
     if topping == "none_toppings":
         context.user_data["order"]["toppings"] = []
-        return await ask_for_quantities(update, context)
+        return await indomie_spice_menu(update, context)
 
     if topping not in context.user_data["order"]["toppings"]:
         context.user_data["order"]["toppings"].append(topping)
@@ -612,10 +651,110 @@ def indomie_toppings_keyboard():
         ],
         [
             InlineKeyboardButton("Back ⬅️", callback_data="back_to_kitchen_menu"),
-            InlineKeyboardButton("Done ✅", callback_data="next_quantities"),
+            InlineKeyboardButton("Done ✅", callback_data="next_spice"),
         ],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+async def indomie_spice_menu(update: Update, context: CallbackContext) -> int:
+    """Displays the spice menu."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Pepper (₦50)", callback_data="spice_pepper"),
+            InlineKeyboardButton("Crayfish (₦50)", callback_data="spice_crayfish"),
+            InlineKeyboardButton("None", callback_data="spice_none"),
+        ],
+        [
+            InlineKeyboardButton("Done ✅", callback_data="next_beverages"),
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.callback_query.edit_message_text(
+        "What spices would you like to add?", reply_markup=reply_markup
+    )
+    return INDOMIE_SPICE
+
+async def indomie_spice(update: Update, context: CallbackContext) -> int:
+    """Stores the selected spices."""
+    query = update.callback_query
+    await query.answer()
+    spice = query.data.split("_")[1]
+
+    if "spices" not in context.user_data["order"]:
+        context.user_data["order"]["spices"] = []
+
+    if spice == "none":
+        context.user_data["order"]["spices"] = []
+        return await ask_for_beverages(update, context)
+
+    if spice == "next":
+        return await ask_for_beverages(update, context)
+
+    if spice not in context.user_data["order"]["spices"]:
+        context.user_data["order"]["spices"].append(spice)
+    else:
+        context.user_data["order"]["spices"].remove(spice)
+
+    selected_spices = ", ".join(context.user_data["order"]["spices"])
+    await query.edit_message_text(
+        f"Selected spices: {selected_spices}\n\n"
+        "What spices would you like to add?",
+        reply_markup=indomie_spice_menu_keyboard(),
+    )
+    return INDOMIE_SPICE
+
+
+async def ask_for_beverages(update: Update, context: CallbackContext) -> int:
+    """Asks the user to select beverages."""
+    keyboard = [
+        [
+            InlineKeyboardButton("Malt (₦500)", callback_data="bev_malt"),
+            InlineKeyboardButton("Coke (₦500)", callback_data="bev_coke"),
+        ],
+        [
+            InlineKeyboardButton("Juice (₦1000)", callback_data="bev_juice"),
+            InlineKeyboardButton("Water (₦200)", callback_data="bev_water"),
+        ],
+        [InlineKeyboardButton("None", callback_data="bev_none")],
+        [InlineKeyboardButton("Done ✅", callback_data="bev_done")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.callback_query.edit_message_text(
+        "Would you like to add any beverages?", reply_markup=reply_markup
+    )
+    return INDOMIE_BEVERAGES
+
+async def handle_beverages(update: Update, context: CallbackContext) -> int:
+    """Handles the user's beverage selection."""
+    query = update.callback_query
+    await query.answer()
+    beverage = query.data.split("_")[1]
+
+    if beverage == "done":
+        return await ask_for_quantities(update, context)
+
+    if beverage == "none":
+        context.user_data["order"]["beverages"] = {}
+        return await ask_for_quantities(update, context)
+
+    context.user_data["current_beverage"] = beverage
+    await query.edit_message_text(f"How many {beverage}s would you like?")
+    return INDOMIE_BEVERAGE_QUANTITY
+
+async def handle_beverage_quantity(update: Update, context: CallbackContext) -> int:
+    """Handles the quantity of the selected beverage."""
+    quantity = int(update.message.text)
+    beverage = context.user_data["current_beverage"]
+
+    if "beverages" not in context.user_data["order"]:
+        context.user_data["order"]["beverages"] = {}
+
+    context.user_data["order"]["beverages"][beverage] = quantity
+
+    # Re-ask for more beverages
+    await update.message.reply_text(f"Added {quantity} {beverage}(s). Add another beverage or select 'Done'.")
+    return await ask_for_beverages(update, context)
 
 
 async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
@@ -623,8 +762,12 @@ async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
     order = context.user_data["order"]
 
     # Mixings
-    if "vegetables" in order["mixings"] and "vegetables" not in order["quantities"]:
-        order["quantities"]["vegetables"] = 1 # Default quantity
+    if "vegetables" in order["mixings"] and "Vegetables" not in order["quantities"]:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("How many vegetables would you like?")
+        else:
+            await update.message.reply_text("How many vegetables would you like?")
+        return INDOMIE_VEGETABLES_QUANTITY
 
     if "sardine" in order["mixings"] and "Sardine" not in order["quantities"]:
         if update.callback_query:
@@ -641,6 +784,13 @@ async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
         return INDOMIE_SUYA_AMOUNT
 
     return await ask_for_topping_quantities(update, context)
+
+
+async def indomie_vegetables_quantity(update: Update, context: CallbackContext) -> int:
+    """Stores the quantity of vegetables."""
+    quantity = int(update.message.text)
+    context.user_data["order"]["quantities"]["Vegetables"] = quantity
+    return await ask_for_quantities(update, context)
 
 
 async def indomie_egg_quantity(update: Update, context: CallbackContext) -> int:
@@ -865,7 +1015,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         "Indomie": 300,
         "Egg": 400,
         "Sausage": 400,
-        "Vegetables": 900,
+        "Vegetables": 700,
         "Sardine": 2000,
         "Suya": 1,  # Price per Naira
         "Custard": 200,
@@ -909,7 +1059,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     keyboard = [
         [
-            InlineKeyboardButton("✅ Place Order", callback_data="confirm_order"),
+            InlineKeyboardButton("💳 Proceed to Payment", callback_data="proceed_to_payment"),
             InlineKeyboardButton("💵 View Bill", callback_data="view_bill"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
@@ -922,6 +1072,52 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text(summary, reply_markup=reply_markup)
 
     return ORDER_SUMMARY
+
+
+async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
+    """Saves the order with a 'pending_payment' status and asks for a screenshot."""
+    query = update.callback_query
+    await query.answer()
+    order = context.user_data["order"]
+    order_id = add_order(
+        user_id=update.effective_user.id,
+        username=update.effective_user.username,
+        food_type=order["food"],
+        mixings=order.get("mixings"),
+        toppings=order.get("toppings"),
+        quantities=order["quantities"],
+        total=order["total"],
+        hall_and_room_number=order.get("hall_and_room_number"),
+        delivery_time=order.get("delivery_time"),
+        status='pending_payment'  # New status
+    )
+    context.user_data["order_id"] = order_id
+
+    await query.edit_message_text(
+        "Your order has been saved. Please upload a screenshot of your payment to complete the order."
+    )
+    return GET_PAYMENT_SCREENSHOT
+
+
+async def handle_payment_screenshot(update: Update, context: CallbackContext) -> int:
+    """Handles the payment screenshot, finalizes the order, and notifies workers."""
+    order_id = context.user_data.get("order_id")
+    if not order_id:
+        await update.message.reply_text("Something went wrong. Please try placing your order again.")
+        return ConversationHandler.END
+
+    screenshot_file_id = update.message.photo[-1].file_id
+    add_payment(order_id, screenshot_file_id)
+    update_order_status(order_id, 'pending')
+
+    # Notify workers
+    await notify_workers(context, order_id)
+
+    await update.message.reply_text(
+        "✅ Payment received! Your order has been placed and our workers have been notified.\n"
+        "Thank you for ordering from Willis Kitchen!"
+    )
+    return ConversationHandler.END
 
 
 async def confirm_order(update: Update, context: CallbackContext) -> int:
@@ -972,7 +1168,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         "Indomie": 300,
         "Egg": 400,
         "Sausage": 400,
-        "Vegetables": 900,
+        "Vegetables": 700,
         "Sardine": 2000,
         "Suya": 1,
         "Custard": 200,
@@ -991,26 +1187,32 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         total = 0
         for item, quantity in order["quantities"].items():
             price = 0
+            unit_price = 0
             if item == "Indomie":
                 if order.get("source_indomie") == "own_indomie":
-                    price = 300 * quantity
-                    bill += f"Indomie (user's own) - Service: ₦{price}\n"
+                    unit_price = 300
+                    price = unit_price * quantity
+                    bill += f"Indomie (user's own): ({quantity} * {unit_price}) = ₦{price}\n"
                 else:
-                    price = 700 * quantity
-                    bill += f"Indomie (from kitchen): ₦{price}\n"
+                    unit_price = 700
+                    price = unit_price * quantity
+                    bill += f"Indomie (from kitchen): ({quantity} * {unit_price}) = ₦{price}\n"
             elif item == "Custard":
                 if order.get("source_custard") == "own_custard":
-                    price = 300 * quantity
-                    bill += f"Custard (user's own) - Service: ₦{price}\n"
+                    unit_price = 300
+                    price = unit_price * quantity
+                    bill += f"Custard (user's own): ({quantity} * {unit_price}) = ₦{price}\n"
                 else:
-                    price = 700 * quantity
-                    bill += f"Custard (from kitchen): ₦{price}\n"
+                    unit_price = 700
+                    price = unit_price * quantity
+                    bill += f"Custard (from kitchen): ({quantity} * {unit_price}) = ₦{price}\n"
             elif item == "Suya":
                 price = quantity
                 bill += f"Suya: ₦{quantity}\n"
             elif item in pricing:
-                price = pricing[item] * quantity
-                bill += f"{item}: ₦{price}\n"
+                unit_price = pricing[item]
+                price = unit_price * quantity
+                bill += f"{item}: ({quantity} * {unit_price}) = ₦{price}\n"
             total += price
 
 
@@ -1046,9 +1248,22 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
         _, _, _, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
         quantities = json.loads(quantities)
 
-        if food_type == 'Indomie' or food_type == 'Custard':
-            food_item = list(quantities.keys())[0]
-            message += f"{i+1}️⃣ {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} on {order_date}\n"
+        if food_type in ['Indomie', 'Custard']:
+            details = []
+            if food_type in quantities:
+                details.append(f"{food_type} ({quantities[food_type]})")
+
+            for item, quantity in quantities.items():
+                if item == food_type:
+                    continue
+                if item == "Suya":
+                    details.append(f"Suya ₦{quantity}")
+                # All other items get braces
+                elif item not in ['item', 'quantity', 'price']:
+                    details.append(f"{item} ({quantity})")
+
+            details_str = ", ".join(details)
+            message += f"{i+1}️⃣ {details_str} - ₦{total} on {order_date}\n"
         else: # Cafe order
             message += f"{i+1}️⃣ {food_type} - ₦{total} on {order_date}\n"
         total_spent += total
@@ -1067,66 +1282,70 @@ async def admin_start(update: Update, context: CallbackContext) -> int:
 
 
 async def admin_password(update: Update, context: CallbackContext) -> int:
-    """Checks the admin password and shows the admin menu."""
+    """Checks the admin password and shows the new admin dashboard."""
     password = update.message.text
     if password == "wiliwili":
         keyboard = [
-            [InlineKeyboardButton("View Today's Orders", callback_data="view_today")],
-            [InlineKeyboardButton("View All Orders", callback_data="view_all")],
+            [InlineKeyboardButton("📦 Orders", callback_data="admin_orders")],
+            [InlineKeyboardButton("👷‍♂️ Workers", callback_data="admin_workers")],
+            [InlineKeyboardButton("💳 Payments", callback_data="admin_payments")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Admin Menu:", reply_markup=reply_markup)
+        await update.message.reply_text("Welcome Admin 👑 What would you like to manage today?", reply_markup=reply_markup)
         return ADMIN_MENU
     else:
         await update.message.reply_text("Incorrect password.")
         return ConversationHandler.END
 
+def admin_orders_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("View Active Orders", callback_data="view_active_orders")],
+        [InlineKeyboardButton("View All Taken Orders", callback_data="view_taken_orders_admin")],
+        [InlineKeyboardButton("View All Placed Orders", callback_data="view_all_orders_admin")],
+        [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
+    ])
 
-async def view_today_orders(update: Update, context: CallbackContext) -> int:
-    """Displays today's orders."""
+async def admin_orders_menu(update: Update, context: CallbackContext) -> int:
+    """Displays the order management menu for admins."""
     query = update.callback_query
     await query.answer()
-    orders = get_todays_orders()
-    if not orders:
-        await query.edit_message_text("No orders today.")
-        return ADMIN_MENU
-
-    message = "📅 Today's Orders:\n"
-    for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
-        quantities = json.loads(quantities)
-
-        if food_type == 'Indomie' or food_type == 'Custard':
-            food_item = list(quantities.keys())[0]
-            message += f"👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total} at {order_date}\n"
-        else: # Cafe order
-            message += f"👤 {username} ({user_id}) - {food_type} - ₦{total} at {order_date}\n"
-
-    await query.edit_message_text(message)
+    await query.edit_message_text("📦 Order Management", reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
 
+def admin_workers_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("View Workers", callback_data="view_workers_admin")],
+        [InlineKeyboardButton("View Active Applications", callback_data="view_active_apps")],
+        [InlineKeyboardButton("View All Applications", callback_data="view_all_apps")],
+        [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
+    ])
 
-async def view_all_orders(update: Update, context: CallbackContext) -> int:
-    """Displays all orders."""
+async def admin_workers_menu(update: Update, context: CallbackContext) -> int:
+    """Displays the worker management menu for admins."""
     query = update.callback_query
     await query.answer()
-    orders = get_all_orders()
-    if not orders:
-        await query.edit_message_text("No orders found.")
+    await query.edit_message_text("👷‍♂️ Worker Management", reply_markup=admin_workers_menu_keyboard())
+    return ADMIN_MENU
+
+async def admin_payments_menu(update: Update, context: CallbackContext) -> int:
+    """Displays the payment management menu for admins."""
+    query = update.callback_query
+    await query.answer()
+    payments = get_all_payments()
+    if not payments:
+        await query.edit_message_text("No payments found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
 
-    message = "📦 All Orders (sorted by date):\n"
-    for order in orders:
-        _, user_id, username, food_type, _, _, quantities, total, order_date, _, _, _, _, _, _ = order
-        quantities = json.loads(quantities)
+    for order_id, screenshot_file_id, username, total in payments:
+        caption = f"Payment for Order #{order_id} from @{username} (Total: ₦{total})"
+        try:
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=screenshot_file_id, caption=caption)
+        except Exception as e:
+            await query.message.reply_text(f"Could not load payment for Order #{order_id}. Error: {e}")
 
-        if food_type == 'Indomie' or food_type == 'Custard':
-            food_item = list(quantities.keys())[0]
-            message += f"📅 {order_date} - 👤 {username} ({user_id}) - {food_type} ({food_item}: {quantities[food_item]}) - ₦{total}\n"
-        else: # Cafe order
-            message += f"📅 {order_date} - 👤 {username} ({user_id}) - {food_type} - ₦{total}\n"
-
-    await query.edit_message_text(message)
+    keyboard = [[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.message.reply_text("All payment screenshots displayed.", reply_markup=reply_markup)
     return ADMIN_MENU
 
 
@@ -1139,6 +1358,147 @@ async def send_daily_messages(bot):
             await bot.send_message(chat_id=user_id, text=message)
         except Exception as e:
             logger.error(f"Failed to send daily message to user {user_id}: {e}")
+
+# New admin functions
+async def view_active_orders_admin(update: Update, context: CallbackContext) -> int:
+    """Displays active (pending) orders to the admin with action buttons."""
+    query = update.callback_query
+    await query.answer()
+    orders = get_orders_by_status('pending')
+    if not orders:
+        await query.edit_message_text("No active orders.", reply_markup=admin_orders_menu_keyboard())
+        return ADMIN_MENU
+
+    await query.edit_message_text("📦 Active Orders:")
+    for order in orders:
+        order_id, _, username, food_type, _, _, _, total, _, _, _, _, _, _, _ = order
+        message = f"ID: {order_id}, User: @{username}, Order: {food_type}, Total: ₦{total}"
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Accept", callback_data=f"admin_accept_{order_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"admin_reject_{order_id}"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text(text=message, reply_markup=reply_markup)
+
+    return ADMIN_MENU
+
+async def view_taken_orders_admin(update: Update, context: CallbackContext) -> int:
+    """Displays all taken orders to the admin."""
+    query = update.callback_query
+    await query.answer()
+    orders = get_orders_by_status('taken')
+    if not orders:
+        await query.edit_message_text("No taken orders.", reply_markup=admin_orders_menu_keyboard())
+        return ADMIN_MENU
+
+    message = "📦 Taken Orders:\n"
+    for order in orders:
+        order_id, _, username, food_type, _, _, _, total, _, _, _, worker_id, _, _, _ = order
+        message += f"ID: {order_id}, User: @{username}, Worker: {worker_id}, Total: ₦{total}\n"
+    await query.edit_message_text(message, reply_markup=admin_orders_menu_keyboard())
+    return ADMIN_MENU
+
+async def view_all_orders_admin(update: Update, context: CallbackContext) -> int:
+    """Displays all orders to the admin."""
+    query = update.callback_query
+    await query.answer()
+    orders = get_all_orders()
+    if not orders:
+        await query.edit_message_text("No orders found.", reply_markup=admin_orders_menu_keyboard())
+        return ADMIN_MENU
+
+    message = "📦 All Orders:\n"
+    for order in orders:
+        order_id, _, username, _, _, _, _, total, _, _, status, _, _, _, _ = order
+        message += f"ID: {order_id}, User: @{username}, Total: ₦{total}, Status: {status}\n"
+    await query.edit_message_text(message, reply_markup=admin_orders_menu_keyboard())
+    return ADMIN_MENU
+
+async def view_workers_admin(update: Update, context: CallbackContext) -> int:
+    """Displays all approved workers."""
+    query = update.callback_query
+    await query.answer()
+    workers = get_all_workers(active_only=False) # A new function to get all workers
+    if not workers:
+        await query.edit_message_text("No workers found.", reply_markup=admin_workers_menu_keyboard())
+        return ADMIN_MENU
+
+    message = "👷‍♂️ Approved Workers:\n"
+    for worker in workers:
+        message += f"Name: {worker[2]}, User ID: {worker[1]}\n"
+    await query.edit_message_text(message, reply_markup=admin_workers_menu_keyboard())
+    return ADMIN_MENU
+
+async def view_active_applications_admin(update: Update, context: CallbackContext) -> int:
+    """Displays pending worker applications."""
+    query = update.callback_query
+    await query.answer()
+    applications = get_worker_applications(status='pending')
+    if not applications:
+        await query.edit_message_text("No active applications.", reply_markup=admin_workers_menu_keyboard())
+        return ADMIN_MENU
+
+    for app in applications:
+        app_id, _, username, name, _, _, phone, _, _ = app
+        message = f"App ID: {app_id}, Name: {name}, User: @{username}, Phone: {phone}"
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{app_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{app_id}"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text(message, reply_markup=reply_markup)
+    return ADMIN_MENU
+
+async def handle_admin_order_action(update: Update, context: CallbackContext) -> None:
+    """Handles admin decisions on active orders."""
+    query = update.callback_query
+    await query.answer()
+
+    action, order_id_str = query.data.split("_", 2)[1:]
+    order_id = int(order_id_str)
+
+    order = get_order_by_id(order_id)
+    if not order:
+        await query.edit_message_text("Order not found.")
+        return
+
+    user_id = order[1]
+    new_status = 'accepted' if action == 'accept' else 'rejected'
+
+    update_order_status(order_id, new_status)
+
+    if new_status == 'accepted':
+        message = "✅ Your order has been accepted and is being prepared."
+    else:
+        message = "❌ Unfortunately, your order has been rejected."
+
+    try:
+        await context.bot.send_message(chat_id=user_id, text=message)
+    except Exception as e:
+        logger.error(f"Failed to send order status update to user {user_id}: {e}")
+
+    await query.edit_message_text(f"Order #{order_id} has been {new_status}.")
+
+
+async def view_all_applications_admin(update: Update, context: CallbackContext) -> int:
+    """Displays all worker applications."""
+    query = update.callback_query
+    await query.answer()
+    applications = get_worker_applications()
+    if not applications:
+        await query.edit_message_text("No applications found.", reply_markup=admin_workers_menu_keyboard())
+        return ADMIN_MENU
+
+    message = "📋 All Applications:\n"
+    for app in applications:
+        app_id, _, username, name, _, _, _, status, _ = app
+        message += f"ID: {app_id}, Name: {name}, User: @{username}, Status: {status}\n"
+    await query.edit_message_text(message, reply_markup=admin_workers_menu_keyboard())
+    return ADMIN_MENU
 
 
 async def main() -> None:
@@ -1176,12 +1536,22 @@ async def main() -> None:
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
             INDOMIE_TOPPINGS: [
-                CallbackQueryHandler(indomie_toppings, pattern="^(egg|sausage|none_toppings|next_quantities)$"),
+                CallbackQueryHandler(indomie_toppings, pattern="^(egg|sausage|none_toppings|next_spice)$"),
                 CallbackQueryHandler(back_to_mixings, pattern="^back_to_mixings$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
             ],
+            INDOMIE_SPICE: [
+                CallbackQueryHandler(indomie_spice, pattern="^spice_")
+            ],
+            INDOMIE_BEVERAGES: [
+                CallbackQueryHandler(handle_beverages, pattern="^bev_")
+            ],
+            INDOMIE_BEVERAGE_QUANTITY: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_beverage_quantity)
+            ],
             INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_sausage_quantity)],
+            INDOMIE_VEGETABLES_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_vegetables_quantity)],
             INDOMIE_SARDINE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_sardine_quantity)],
             INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_suya_amount)],
             INDOMIE_SOURCE: [CallbackQueryHandler(indomie_source, pattern="^(own_indomie|kitchen_indomie)$")],
@@ -1195,13 +1565,18 @@ async def main() -> None:
             CUSTARD_SUGAR_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_sugar_quantity)],
             CUSTARD_MILK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_milk_quantity)],
             ORDER_SUMMARY: [
-                CallbackQueryHandler(confirm_order, pattern="^confirm_order$"),
+                CallbackQueryHandler(proceed_to_payment, pattern="^proceed_to_payment$"),
                 CallbackQueryHandler(view_bill, pattern="^view_bill$"),
                 CallbackQueryHandler(show_order_summary, pattern="^back_to_summary$"),
                 CallbackQueryHandler(cancel, pattern="^cancel$"),
-                CallbackQueryHandler(confirm_cafe_order, pattern="^confirm_cafe_order$"),
             ],
-            CAFE_ORDER: [MessageHandler(filters.TEXT & ~filters.COMMAND, cafe_order)],
+            GET_PAYMENT_SCREENSHOT: [
+                MessageHandler(filters.PHOTO, handle_payment_screenshot)
+            ],
+            CAFE_ORDER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cafe_order),
+                CommandHandler("done", cafe_order_done),
+            ],
             WORKER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_name)],
             WORKER_REG_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_reg_no)],
             WORKER_MATRIC_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_matric_no)],
@@ -1220,12 +1595,21 @@ async def main() -> None:
         states={
             ADMIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_password)],
             ADMIN_MENU: [
-                CallbackQueryHandler(view_today_orders, pattern="^view_today$"),
-                CallbackQueryHandler(view_all_orders, pattern="^view_all$"),
+        CallbackQueryHandler(admin_orders_menu, pattern="^admin_orders$"),
+        CallbackQueryHandler(admin_workers_menu, pattern="^admin_workers$"),
+        CallbackQueryHandler(admin_payments_menu, pattern="^admin_payments$"),
+                CallbackQueryHandler(admin_password, pattern="^admin_main_menu$"),
+                CallbackQueryHandler(view_active_orders_admin, pattern="^view_active_orders$"),
+                CallbackQueryHandler(view_taken_orders_admin, pattern="^view_taken_orders_admin$"),
+                CallbackQueryHandler(view_all_orders_admin, pattern="^view_all_orders_admin$"),
+                CallbackQueryHandler(view_workers_admin, pattern="^view_workers_admin$"),
+                CallbackQueryHandler(view_active_applications_admin, pattern="^view_active_apps$"),
+                CallbackQueryHandler(view_all_applications_admin, pattern="^view_all_apps$"),
             ],
         },
         fallbacks=[],
     )
+    application.add_handler(CallbackQueryHandler(handle_admin_order_action, pattern="^admin_(accept|reject)_"))
 
     application.add_handler(main_conv_handler)
     application.add_handler(admin_conv_handler)
@@ -1237,7 +1621,7 @@ async def main() -> None:
 
     # Scheduler for daily messages
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_daily_messages, 'interval', days=1, args=[application.bot])
+    scheduler.add_job(send_daily_messages, 'interval', hours=6, args=[application.bot])
 
     async with application:
         webhook_url = os.getenv("WEBHOOK_URL")
