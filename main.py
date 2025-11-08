@@ -73,8 +73,11 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_PAYMENT_SCREENSHOT,
     INDOMIE_SPICE,
     INDOMIE_BEVERAGES,
-    INDOMIE_BEVERAGE_QUANTITY,
-) = range(31)
+    INDOMIE_MALT_QUANTITY,
+    INDOMIE_COKE_QUANTITY,
+    INDOMIE_JUICE_QUANTITY,
+    INDOMIE_WATER_QUANTITY,
+) = range(34)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -605,8 +608,8 @@ def indomie_spice_menu_keyboard():
     """Returns the keyboard for the spice menu."""
     keyboard = [
         [
-            InlineKeyboardButton("Pepper (₦50)", callback_data="spice_pepper"),
-            InlineKeyboardButton("Crayfish (₦50)", callback_data="spice_crayfish"),
+            InlineKeyboardButton("Pepper (₦200)", callback_data="spice_pepper"),
+            InlineKeyboardButton("Crayfish (₦200)", callback_data="spice_crayfish"),
             InlineKeyboardButton("None", callback_data="spice_none"),
         ],
         [
@@ -661,8 +664,8 @@ async def indomie_spice_menu(update: Update, context: CallbackContext) -> int:
     """Displays the spice menu."""
     keyboard = [
         [
-            InlineKeyboardButton("Pepper (₦50)", callback_data="spice_pepper"),
-            InlineKeyboardButton("Crayfish (₦50)", callback_data="spice_crayfish"),
+            InlineKeyboardButton("Pepper (₦200)", callback_data="spice_pepper"),
+            InlineKeyboardButton("Crayfish (₦200)", callback_data="spice_crayfish"),
             InlineKeyboardButton("None", callback_data="spice_none"),
         ],
         [
@@ -705,8 +708,8 @@ async def indomie_spice(update: Update, context: CallbackContext) -> int:
     return INDOMIE_SPICE
 
 
-async def ask_for_beverages(update: Update, context: CallbackContext) -> int:
-    """Asks the user to select beverages."""
+def beverage_keyboard():
+    """Returns the keyboard for the beverage menu."""
     keyboard = [
         [
             InlineKeyboardButton("Malt (₦500)", callback_data="bev_malt"),
@@ -719,9 +722,12 @@ async def ask_for_beverages(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("None", callback_data="bev_none")],
         [InlineKeyboardButton("Done ✅", callback_data="bev_done")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(keyboard)
+
+async def ask_for_beverages(update: Update, context: CallbackContext) -> int:
+    """Asks the user to select beverages."""
     await update.callback_query.edit_message_text(
-        "Would you like to add any beverages?", reply_markup=reply_markup
+        "Would you like to add any beverages?", reply_markup=beverage_keyboard()
     )
     return INDOMIE_BEVERAGES
 
@@ -731,30 +737,74 @@ async def handle_beverages(update: Update, context: CallbackContext) -> int:
     await query.answer()
     beverage = query.data.split("_")[1]
 
+    if "beverages" not in context.user_data["order"]:
+        context.user_data["order"]["beverages"] = []
+
     if beverage == "done":
-        return await ask_for_quantities(update, context)
+        return await ask_for_beverage_quantities(update, context)
 
     if beverage == "none":
-        context.user_data["order"]["beverages"] = {}
-        return await ask_for_quantities(update, context)
+        context.user_data["order"]["beverages"] = []
+        return await ask_for_beverage_quantities(update, context)
 
-    context.user_data["current_beverage"] = beverage
-    await query.edit_message_text(f"How many {beverage}s would you like?")
-    return INDOMIE_BEVERAGE_QUANTITY
+    if beverage not in context.user_data["order"]["beverages"]:
+        context.user_data["order"]["beverages"].append(beverage)
+    else:
+        context.user_data["order"]["beverages"].remove(beverage)
 
-async def handle_beverage_quantity(update: Update, context: CallbackContext) -> int:
-    """Handles the quantity of the selected beverage."""
+    selected_beverages = ", ".join(context.user_data["order"]["beverages"])
+    await query.edit_message_text(
+        f"Selected beverages: {selected_beverages}\n\n"
+        "Would you like to add any beverages?",
+        reply_markup=beverage_keyboard(),
+    )
+    return INDOMIE_BEVERAGES
+
+async def ask_for_beverage_quantities(update: Update, context: CallbackContext) -> int:
+    """Asks for the quantity of each selected beverage, one by one."""
+    beverages = context.user_data["order"].get("beverages", [])
+
+    if "quantities" not in context.user_data["order"]:
+        context.user_data["order"]["quantities"] = {}
+
+    if "malt" in beverages and "malt" not in context.user_data["order"]["quantities"]:
+        await update.callback_query.edit_message_text("How many malts would you like?")
+        return INDOMIE_MALT_QUANTITY
+    if "coke" in beverages and "coke" not in context.user_data["order"]["quantities"]:
+        await update.callback_query.edit_message_text("How many cokes would you like?")
+        return INDOMIE_COKE_QUANTITY
+    if "juice" in beverages and "juice" not in context.user_data["order"]["quantities"]:
+        await update.callback_query.edit_message_text("How many juices would you like?")
+        return INDOMIE_JUICE_QUANTITY
+    if "water" in beverages and "water" not in context.user_data["order"]["quantities"]:
+        await update.callback_query.edit_message_text("How many waters would you like?")
+        return INDOMIE_WATER_QUANTITY
+
+    return await ask_for_quantities(update, context)
+
+async def handle_malt_quantity(update: Update, context: CallbackContext) -> int:
+    """Handles the quantity of malt."""
     quantity = int(update.message.text)
-    beverage = context.user_data["current_beverage"]
+    context.user_data["order"]["quantities"]["malt"] = quantity
+    return await ask_for_beverage_quantities(update, context)
 
-    if "beverages" not in context.user_data["order"]:
-        context.user_data["order"]["beverages"] = {}
+async def handle_coke_quantity(update: Update, context: CallbackContext) -> int:
+    """Handles the quantity of coke."""
+    quantity = int(update.message.text)
+    context.user_data["order"]["quantities"]["coke"] = quantity
+    return await ask_for_beverage_quantities(update, context)
 
-    context.user_data["order"]["beverages"][beverage] = quantity
+async def handle_juice_quantity(update: Update, context: CallbackContext) -> int:
+    """Handles the quantity of juice."""
+    quantity = int(update.message.text)
+    context.user_data["order"]["quantities"]["juice"] = quantity
+    return await ask_for_beverage_quantities(update, context)
 
-    # Re-ask for more beverages
-    await update.message.reply_text(f"Added {quantity} {beverage}(s). Add another beverage or select 'Done'.")
-    return await ask_for_beverages(update, context)
+async def handle_water_quantity(update: Update, context: CallbackContext) -> int:
+    """Handles the quantity of water."""
+    quantity = int(update.message.text)
+    context.user_data["order"]["quantities"]["water"] = quantity
+    return await ask_for_beverage_quantities(update, context)
 
 
 async def ask_for_quantities(update: Update, context: CallbackContext) -> int:
@@ -1021,14 +1071,20 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         "Custard": 200,
         "Sugar": 50,
         "Milk": 400,
+        "pepper": 200,
+        "crayfish": 200,
+        "malt": 500,
+        "coke": 500,
+        "juice": 1000,
+        "water": 200,
     }
 
     if order.get("source") == "cafe":
-        quantities = order["quantities"]
-        price = quantities["price"]
-        total = price + order["service_charge"]
-        summary += f"{quantities['item']} ({quantities['quantity']}) - ₦{price}\n"
+        items = order["quantities"]
+        for item in items:
+            summary += f"{item['item']} ({item['quantity']}) - ₦{item['price']}\n"
         summary += f"Service Charge - ₦{order['service_charge']}\n"
+        total = order['total']
     else:
         for item, quantity in order["quantities"].items():
             if item in ["Indomie", "Custard"]:
@@ -1050,6 +1106,9 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
                 price = pricing.get(item, 0) * quantity
             total += price
 
+        for spice in order.get("spices", []):
+            total += pricing.get(spice, 0)
+
 
     order["total"] = total
     summary += "----------------------\n"
@@ -1059,7 +1118,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     keyboard = [
         [
-            InlineKeyboardButton("💳 Proceed to Payment", callback_data="proceed_to_payment"),
+            InlineKeyboardButton("✅ I have paid", callback_data="proceed_to_payment"),
             InlineKeyboardButton("💵 View Bill", callback_data="view_bill"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
@@ -1115,7 +1174,7 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
 
     await update.message.reply_text(
         "✅ Payment received! Your order has been placed and our workers have been notified.\n"
-        "Thank you for ordering from Willis Kitchen!"
+        "You will receive a notification once your order is accepted."
     )
     return ConversationHandler.END
 
@@ -1174,14 +1233,20 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         "Custard": 200,
         "Sugar": 50,
         "Milk": 400,
+        "pepper": 200,
+        "crayfish": 200,
+        "malt": 500,
+        "coke": 500,
+        "juice": 1000,
+        "water": 200,
     }
 
     if order.get("source") == "cafe":
-        quantities = order["quantities"]
-        price = quantities["price"]
-        total = price + order["service_charge"]
-        bill += f"{quantities['item']} ({quantities['quantity']}) - ₦{price}\n"
+        items = order["quantities"]
+        for item in items:
+            bill += f"{item['item']} ({item['quantity']}) - ₦{item['price']}\n"
         bill += f"Service Charge - ₦{order['service_charge']}\n"
+        total = order['total']
     else:
         # Calculate total for kitchen orders
         total = 0
@@ -1213,6 +1278,11 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
                 unit_price = pricing[item]
                 price = unit_price * quantity
                 bill += f"{item}: ({quantity} * {unit_price}) = ₦{price}\n"
+            total += price
+
+        for spice in order.get("spices", []):
+            price = pricing.get(spice, 0)
+            bill += f"{spice.capitalize()}: ₦{price}\n"
             total += price
 
 
@@ -1508,10 +1578,20 @@ async def main() -> None:
 
     application = Application.builder().token(TOKEN).build()
 
+    worker_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("work", work_with_us_command)],
+        states={
+            WORKER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_name)],
+            WORKER_REG_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_reg_no)],
+            WORKER_MATRIC_NO: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_matric_no)],
+            WORKER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_phone)],
+        },
+        fallbacks=[CommandHandler("start", start)],
+    )
+
     main_conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            CommandHandler("work", work_with_us_command),
             CommandHandler("working", working_history),
         ],
         states={
@@ -1546,9 +1626,10 @@ async def main() -> None:
             INDOMIE_BEVERAGES: [
                 CallbackQueryHandler(handle_beverages, pattern="^bev_")
             ],
-            INDOMIE_BEVERAGE_QUANTITY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_beverage_quantity)
-            ],
+            INDOMIE_MALT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_malt_quantity)],
+            INDOMIE_COKE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coke_quantity)],
+            INDOMIE_JUICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_juice_quantity)],
+            INDOMIE_WATER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_water_quantity)],
             INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_sausage_quantity)],
             INDOMIE_VEGETABLES_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_vegetables_quantity)],
@@ -1609,11 +1690,11 @@ async def main() -> None:
         },
         fallbacks=[],
     )
-    application.add_handler(CallbackQueryHandler(handle_admin_order_action, pattern="^admin_(accept|reject)_"))
-
-    application.add_handler(main_conv_handler)
     application.add_handler(admin_conv_handler)
+    application.add_handler(worker_conv_handler)
+    application.add_handler(main_conv_handler)
     application.add_handler(CommandHandler("share", share_command))
+    application.add_handler(CallbackQueryHandler(handle_admin_order_action, pattern="^admin_(accept|reject)_"))
     application.add_handler(CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"))
     application.add_handler(CallbackQueryHandler(take_order, pattern="^take_"))
     application.add_handler(CallbackQueryHandler(copy_share_message_callback, pattern="^copy_share_message$"))
