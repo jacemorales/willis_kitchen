@@ -38,6 +38,9 @@ def init_db():
         ("hall_and_room_number", "TEXT"),
         ("delivery_time", "TEXT"),
         ("service_charge", "REAL"),
+        ("flavor", "TEXT"),
+        ("size", "TEXT"),
+        ("notes", "TEXT"),
     ]
     for column, col_type in columns:
         try:
@@ -85,6 +88,18 @@ def init_db():
             phone TEXT,
             status TEXT DEFAULT 'pending',
             application_date DATETIME NOT NULL
+        )
+    """)
+
+    # Create feedback table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            name TEXT,
+            feedback_text TEXT,
+            timestamp DATETIME NOT NULL
         )
     """)
     conn.commit()
@@ -249,6 +264,27 @@ def update_worker_application_status(application_id, status):
     cursor.execute("UPDATE worker_applications SET status = ? WHERE id = ?", (status, application_id))
     conn.commit()
     conn.close()
+
+def add_feedback(user_id, username, name, feedback_text):
+    """Adds customer feedback to the database."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    timestamp = datetime.now()
+    cursor.execute("""
+        INSERT INTO feedback (user_id, username, name, feedback_text, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, username, name, feedback_text, timestamp))
+    conn.commit()
+    conn.close()
+
+def get_all_feedback():
+    """Retrieves all customer feedback from the database."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM feedback ORDER BY timestamp DESC")
+    feedback = cursor.fetchall()
+    conn.close()
+    return feedback
 
 def get_all_payments():
     """Retrieves all payments with order details."""
