@@ -133,7 +133,7 @@ def get_user_orders(user_id):
     """Retrieves all orders for a specific user."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM orders WHERE user_id = ? ORDER BY order_date DESC", (user_id,))
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE user_id = ? ORDER BY order_date DESC", (user_id,))
     orders = cursor.fetchall()
     conn.close()
     return orders
@@ -142,7 +142,7 @@ def get_all_orders():
     """Retrieves all orders from the database, sorted by date."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM orders ORDER BY order_date DESC")
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders ORDER BY order_date DESC")
     orders = cursor.fetchall()
     conn.close()
     return orders
@@ -152,7 +152,7 @@ def get_todays_orders():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     today_str = datetime.now().strftime('%Y-%m-%d')
-    cursor.execute("SELECT * FROM orders WHERE DATE(order_date) = ? ORDER BY order_date DESC", (today_str,))
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE DATE(order_date) = ? ORDER BY order_date DESC", (today_str,))
     orders = cursor.fetchall()
     conn.close()
     return orders
@@ -173,9 +173,9 @@ def get_all_workers(active_only=True):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     if active_only:
-        cursor.execute("SELECT * FROM workers WHERE status = 'active'")
+        cursor.execute("SELECT id, user_id, name, reg_no, matric_no, phone, status FROM workers WHERE status = 'active'")
     else:
-        cursor.execute("SELECT * FROM workers")
+        cursor.execute("SELECT id, user_id, name, reg_no, matric_no, phone, status FROM workers")
     workers = cursor.fetchall()
     conn.close()
     return workers
@@ -184,7 +184,7 @@ def get_orders_by_status(status):
     """Retrieves all orders with a specific status."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM orders WHERE status = ? ORDER BY order_date DESC", (status,))
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE status = ? ORDER BY order_date DESC", (status,))
     orders = cursor.fetchall()
     conn.close()
     return orders
@@ -210,7 +210,7 @@ def get_worker_orders(worker_id, status):
     """Retrieves orders taken by a worker with a specific status."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM orders WHERE taken_by = ? AND status = ? ORDER BY order_date DESC", (worker_id, status))
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE taken_by = ? AND status = ? ORDER BY order_date DESC", (worker_id, status))
     orders = cursor.fetchall()
     conn.close()
     return orders
@@ -219,7 +219,7 @@ def get_order_by_id(order_id):
     """Retrieves an order by its ID."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM orders WHERE id = ?", (order_id,))
+    cursor.execute("SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE id = ?", (order_id,))
     order = cursor.fetchone()
     conn.close()
     return order
@@ -250,9 +250,9 @@ def get_worker_applications(status=None):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     if status:
-        cursor.execute("SELECT * FROM worker_applications WHERE status = ? ORDER BY application_date DESC", (status,))
+        cursor.execute("SELECT id, user_id, username, name, reg_no, matric_no, phone, status, application_date FROM worker_applications WHERE status = ? ORDER BY application_date DESC", (status,))
     else:
-        cursor.execute("SELECT * FROM worker_applications ORDER BY application_date DESC")
+        cursor.execute("SELECT id, user_id, username, name, reg_no, matric_no, phone, status, application_date FROM worker_applications ORDER BY application_date DESC")
     applications = cursor.fetchall()
     conn.close()
     return applications
@@ -281,7 +281,7 @@ def get_all_feedback():
     """Retrieves all customer feedback from the database."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM feedback ORDER BY timestamp DESC")
+    cursor.execute("SELECT id, user_id, username, name, feedback_text, timestamp FROM feedback ORDER BY timestamp DESC")
     feedback = cursor.fetchall()
     conn.close()
     return feedback
