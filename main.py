@@ -1390,9 +1390,13 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     items = order.get("items", [])
     total = sum(item.get("total_price", 0) for item in items)
 
-    # Calculate service charge: ₦250 per Indomie item
-    indomie_items_count = sum(1 for item in items if item.get("type") == "base" and "indomie" in item.get("name", "").lower())
-    service_charge = indomie_items_count * 250
+    # Calculate service charge: ₦250 per Indomie or Custard item, based on quantity
+    service_charge = 0
+    for item in items:
+        if item.get("type") == "base":
+            name = item.get("name", "").lower()
+            if "indomie" in name or "custard" in name:
+                service_charge += item.get("quantity", 0) * 250
     total += service_charge
     order["service_charge"] = service_charge
     order["total"] = total
@@ -1412,7 +1416,8 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     summary += "----------------------\n"
     summary += f"*Total: ₦{total}*\n\n"
     summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app"
+    summary += "https://pay-naira.netlify.app\n"
+    summary += "*open link in browser*"
 
     keyboard = [
         [
@@ -1541,12 +1546,17 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
             bill += f"• {name} ({quantity} × ₦{unit_price}) = ₦{item_total}\n"
         subtotal += item_total
 
-    indomie_items_count = sum(1 for item in items if item.get("type") == "base" and "indomie" in item.get("name", "").lower())
-    service_charge = indomie_items_count * 250
+    # Recalculate service charge for the bill view
+    service_charge = 0
+    for item in items:
+        if item.get("type") == "base":
+            name = item.get("name", "").lower()
+            if "indomie" in name or "custard" in name:
+                service_charge += item.get("quantity", 0) * 250
     total = subtotal + service_charge
-
-    bill += "----------------------\n"
+    
     bill += f"Service Charge: ₦{service_charge}\n"
+    bill += "----------------------\n"
     bill += f"💰 *Total = ₦{total}*"
 
     # Ensure the order total is up-to-date
@@ -1734,7 +1744,7 @@ async def view_active_orders_admin(update: Update, context: CallbackContext) -> 
     """Displays active (pending) orders to the admin with action buttons."""
     query = update.callback_query
     await query.answer()
-    orders_data = get_orders_by_status('pending')
+    orders_data = get_orders_by_status(('pending', 'pending_payment'))
     if not orders_data:
         await safe_edit_message(update, "No active orders yet.", reply_markup=admin_orders_menu_keyboard())
         return ADMIN_MENU
