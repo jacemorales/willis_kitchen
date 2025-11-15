@@ -126,7 +126,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_WATER_QUANTITY,
     ASK_BEVERAGE,
     GET_EXTRA_NOTES,
-) = range(38)
+) = range(42)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
