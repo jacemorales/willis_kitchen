@@ -467,15 +467,6 @@ async def get_hall_and_room_number(update: Update, context: CallbackContext) -> 
 async def get_delivery_time(update: Update, context: CallbackContext) -> int:
     """Stores the delivery time and proceeds to the order summary."""
     context.user_data["order"]["delivery_time"] = update.message.text
-    # We now directly show the summary after getting the delivery time.
-    # A 'mock' query is created to ensure show_order_summary works as expected.
-    class MockQuery:
-        def __init__(self, message):
-            self.message = message
-        async def answer(self): pass
-        async def edit_message_text(self, *args, **kwargs):
-            return await self.message.reply_text(*args, **kwargs)
-    update.callback_query = MockQuery(update.message)
     return await show_order_summary(update, context)
 
 
@@ -732,15 +723,23 @@ async def ask_for_mixing_quantities(update: Update, context: CallbackContext) ->
     next_mixing_to_ask = next((mixing for mixing in selected_mixings if mixing not in item_names_in_order), None)
 
     if next_mixing_to_ask:
+        message_text = ""
+        next_state = -1
         if next_mixing_to_ask == "vegetables":
-            await update.callback_query.edit_message_text("How many servings of vegetables would you like?")
-            return INDOMIE_VEGETABLES_QUANTITY
-        if next_mixing_to_ask == "suya":
-            await update.callback_query.edit_message_text("Enter the amount for suya (₦):")
-            return INDOMIE_SUYA_AMOUNT
-        if next_mixing_to_ask == "sardine":
-            await update.callback_query.edit_message_text("How many servings of sardine would you like?")
-            return INDOMIE_SARDINE_QUANTITY
+            message_text = "How many servings of vegetables would you like?"
+            next_state = INDOMIE_VEGETABLES_QUANTITY
+        elif next_mixing_to_ask == "suya":
+            message_text = "Enter the amount for suya (₦):"
+            next_state = INDOMIE_SUYA_AMOUNT
+        elif next_mixing_to_ask == "sardine":
+            message_text = "How many servings of sardine would you like?"
+            next_state = INDOMIE_SARDINE_QUANTITY
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message_text)
+        else:
+            await update.message.reply_text(message_text)
+        return next_state
 
     # If all mixing quantities are gathered, move to toppings
     return await indomie_toppings_menu(update, context)
@@ -829,24 +828,32 @@ async def ask_for_topping_quantities(update: Update, context: CallbackContext) -
     next_topping_to_ask = next((topping for topping in selected_toppings if topping not in item_names_in_order), None)
 
     if next_topping_to_ask:
+        message_text = ""
+        next_state = -1
         if next_topping_to_ask == "egg":
-            await update.callback_query.edit_message_text("How many eggs would you like?")
-            return INDOMIE_EGG_QUANTITY
-        if next_topping_to_ask == "sausage":
-            await update.callback_query.edit_message_text("How many sausages would you like?")
-            return INDOMIE_SAUSAGE_QUANTITY
-        if next_topping_to_ask == "chicken_1000":
-            await update.callback_query.edit_message_text("How many pieces of chicken (₦1000) would you like?")
-            return INDOMIE_CHICKEN_1000_QUANTITY
-        if next_topping_to_ask == "chicken_1500":
-            await update.callback_query.edit_message_text("How many pieces of chicken (₦1500) would you like?")
-            return INDOMIE_CHICKEN_1500_QUANTITY
-        if next_topping_to_ask == "chicken_3000":
-            await update.callback_query.edit_message_text("How many pieces of chicken (₦3000) would you like?")
-            return INDOMIE_CHICKEN_3000_QUANTITY
-        if next_topping_to_ask == "fried fish":
-            await update.callback_query.edit_message_text("How many pieces of fried fish would you like?")
-            return INDOMIE_FRIED_FISH_QUANTITY
+            message_text = "How many eggs would you like?"
+            next_state = INDOMIE_EGG_QUANTITY
+        elif next_topping_to_ask == "sausage":
+            message_text = "How many sausages would you like?"
+            next_state = INDOMIE_SAUSAGE_QUANTITY
+        elif next_topping_to_ask == "chicken_1000":
+            message_text = "How many pieces of chicken (₦1000) would you like?"
+            next_state = INDOMIE_CHICKEN_1000_QUANTITY
+        elif next_topping_to_ask == "chicken_1500":
+            message_text = "How many pieces of chicken (₦1500) would you like?"
+            next_state = INDOMIE_CHICKEN_1500_QUANTITY
+        elif next_topping_to_ask == "chicken_3000":
+            message_text = "How many pieces of chicken (₦3000) would you like?"
+            next_state = INDOMIE_CHICKEN_3000_QUANTITY
+        elif next_topping_to_ask == "fried fish":
+            message_text = "How many pieces of fried fish would you like?"
+            next_state = INDOMIE_FRIED_FISH_QUANTITY
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message_text)
+        else:
+            await update.message.reply_text(message_text)
+        return next_state
 
     # If all topping quantities are gathered, move to beverages
     return await ask_for_beverages(update, context)
@@ -889,18 +896,26 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
     next_beverage_to_ask = next((beverage for beverage in selected_beverages if beverage not in item_names_in_order), None)
 
     if next_beverage_to_ask:
+        message_text = ""
+        next_state = -1
         if next_beverage_to_ask == "water":
-            await update.callback_query.edit_message_text("How many bottles of water would you like?")
-            return INDOMIE_WATER_QUANTITY
-        if next_beverage_to_ask == "soft drink":
-            await update.callback_query.edit_message_text("How many soft drinks would you like?")
-            return INDOMIE_COKE_QUANTITY
-        if next_beverage_to_ask == "malt":
-            await update.callback_query.edit_message_text("How many malts would you like?")
-            return INDOMIE_MALT_QUANTITY
-        if next_beverage_to_ask == "1ltr drink":
-            await update.callback_query.edit_message_text("How many 1Ltr drinks would you like?")
-            return INDOMIE_JUICE_QUANTITY
+            message_text = "How many bottles of water would you like?"
+            next_state = INDOMIE_WATER_QUANTITY
+        elif next_beverage_to_ask == "soft drink":
+            message_text = "How many soft drinks would you like?"
+            next_state = INDOMIE_COKE_QUANTITY
+        elif next_beverage_to_ask == "malt":
+            message_text = "How many malts would you like?"
+            next_state = INDOMIE_MALT_QUANTITY
+        elif next_beverage_to_ask == "1ltr drink":
+            message_text = "How many 1Ltr drinks would you like?"
+            next_state = INDOMIE_JUICE_QUANTITY
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message_text)
+        else:
+            await update.message.reply_text(message_text)
+        return next_state
 
     return await ask_for_extra_notes(update, context)
 
@@ -908,14 +923,14 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
 async def ask_for_extra_notes(update: Update, context: CallbackContext) -> int:
     """Asks the user for extra notes."""
     message = "Would you like to add any extra notes for the chef or delivery person? (Type /skip if none)"
-
+    
     # We need to handle both callback query and message updates
     if update.callback_query:
         await safe_edit_message_text(update, message)
     else:
         # This case happens when the user just entered a quantity
         await update.message.reply_text(message)
-
+        
     return GET_EXTRA_NOTES
 
 
@@ -942,14 +957,6 @@ async def get_beverage_quantity(update: Update, context: CallbackContext, bevera
         })
         order["items"] = items
 
-        class MockQuery:
-            def __init__(self, message):
-                self.message = message
-            async def answer(self): pass
-            async def edit_message_text(self, *args, **kwargs):
-                return await self.message.reply_text(*args, **kwargs)
-
-        update.callback_query = MockQuery(update.message)
         return await ask_for_beverage_quantities(update, context)
 
     except (ValueError, TypeError):
@@ -998,17 +1005,6 @@ async def get_topping_quantity(update: Update, context: CallbackContext, topping
         order["items"] = items
 
         # After getting quantity, we re-call ask_for_topping_quantities to see if there's another topping.
-        # This requires a "mock" query object because we are in a message handler, not a callback handler.
-        class MockQuery:
-            def __init__(self, message):
-                self.message = message
-            async def answer(self): pass
-            async def edit_message_text(self, *args, **kwargs):
-                # When moving to the next step, we want to send a new message, not edit.
-                return await self.message.reply_text(*args, **kwargs)
-
-        # We attach the mock query to the update object for the next function to use.
-        update.callback_query = MockQuery(update.message)
         return await ask_for_topping_quantities(update, context)
 
     except (ValueError, TypeError):
@@ -1039,14 +1035,6 @@ async def get_mixing_quantity(update: Update, context: CallbackContext, mixing_n
         })
         order["items"] = items
 
-        class MockQuery:
-            def __init__(self, message):
-                self.message = message
-            async def answer(self): pass
-            async def edit_message_text(self, *args, **kwargs):
-                return await self.message.reply_text(*args, **kwargs)
-
-        update.callback_query = MockQuery(update.message)
         return await ask_for_mixing_quantities(update, context)
 
     except (ValueError, TypeError):
@@ -1245,12 +1233,20 @@ async def ask_for_custard_quantities(update: Update, context: CallbackContext) -
     next_addition_to_ask = next((add for add in selected_additions if add not in item_names_in_order), None)
 
     if next_addition_to_ask:
+        message_text = ""
+        next_state = -1
         if next_addition_to_ask == "sugar":
-            await update.callback_query.edit_message_text("How many spoons of sugar would you like?")
-            return CUSTARD_SUGAR_QUANTITY
-        if next_addition_to_ask == "milk":
-            await update.callback_query.edit_message_text("How many sachets of milk would you like?")
-            return CUSTARD_MILK_QUANTITY
+            message_text = "How many spoons of sugar would you like?"
+            next_state = CUSTARD_SUGAR_QUANTITY
+        elif next_addition_to_ask == "milk":
+            message_text = "How many sachets of milk would you like?"
+            next_state = CUSTARD_MILK_QUANTITY
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(message_text)
+        else:
+            await update.message.reply_text(message_text)
+        return next_state
 
     # If all quantities are gathered, move to the next step
     return await ask_for_hall_and_room_number(update, context)
@@ -1282,13 +1278,6 @@ async def get_custard_addition_quantity(update: Update, context: CallbackContext
     })
     order["items"] = items
 
-    class MockQuery:
-        def __init__(self, message): self.message = message
-        async def answer(self): pass
-        async def edit_message_text(self, *args, **kwargs):
-            return await self.message.reply_text(*args, **kwargs)
-
-    update.callback_query = MockQuery(update.message)
     return await ask_for_custard_quantities(update, context)
 
 
@@ -1342,7 +1331,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         name = item.get("name", "Unknown Item").title()
         quantity = item.get("quantity", 0)
         summary += f"• {name} (x{quantity})\n"
-
+        
     # Add notes to the summary if they exist
     if order.get("notes"):
         summary += f"\n**Notes:** {order['notes']}\n"
