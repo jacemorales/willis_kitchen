@@ -65,13 +65,20 @@ PRICES = {
 }
 
 
-async def safe_edit_message_text(update: Update, text: str, reply_markup=None):
-    """Safely edits a message, avoiding re-sending the same content."""
+async def safe_edit_message(update: Update, text: str, reply_markup=None):
+    """Safely edits a message if possible, otherwise sends a new one."""
     try:
-        if update.callback_query.message.text != text or update.callback_query.message.reply_markup != reply_markup:
-            await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+        if update.callback_query:
+            # If the message content or markup is different, edit the message
+            if update.callback_query.message.text != text or update.callback_query.message.reply_markup != reply_markup:
+                await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+            else:
+                # If the content is the same, just answer the callback query to remove the "loading" state
+                await update.callback_query.answer()
+        elif update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup)
     except Exception as e:
-        logger.error(f"Error editing message: {e}")
+        logger.error(f"Error in safe_edit_message: {e}")
 
 # Enable logging
 logging.basicConfig(
@@ -142,7 +149,7 @@ async def start(update: Update, context: CallbackContext) -> int:
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=reply_markup)
     else:
-        await safe_edit_message_text(update, welcome_text, reply_markup=reply_markup)
+        await safe_edit_message(update, welcome_text, reply_markup=reply_markup)
     return MAIN_MENU
 
 
@@ -157,7 +164,7 @@ async def kitchen_menu(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(
+    await safe_edit_message(
         update, "Please choose a food option from our kitchen:", reply_markup=reply_markup
     )
     return KITCHEN_MENU
@@ -172,7 +179,7 @@ async def cafe_menu(update: Update, context: CallbackContext) -> int:
         "items": [],
         "source": "cafe",
     }
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         "Please send each item you want to order in the format: `Item, Quantity, Total Price`.\n\n"
         "Example: `Meat Pie, 2, 1600`\n\n"
@@ -256,7 +263,7 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
     keyboard = [[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await safe_edit_message_text(update, summary, reply_markup=reply_markup)
+    await safe_edit_message(update, summary, reply_markup=reply_markup)
     return ConversationHandler.END
 
 
@@ -293,7 +300,7 @@ async def work_with_us(update: Update, context: CallbackContext) -> int:
     """Starts the worker application process."""
     query = update.callback_query
     await query.answer()
-    await safe_edit_message_text(update, "Please enter your full name:")
+    await safe_edit_message(update, "Please enter your full name:")
     return WORKER_NAME
 
 
@@ -373,7 +380,7 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
     application_data = next((app for app in apps if app[0] == application_id), None)
 
     if not application_data:
-        await safe_edit_message_text(update, "Application not found.")
+        await safe_edit_message(update, "Application not found.")
         return
 
     user_id = application_data[1]
@@ -391,14 +398,14 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
             chat_id=user_id,
             text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker."
         )
-        await safe_edit_message_text(update, f"Application {application_id} approved.")
+        await safe_edit_message(update, f"Application {application_id} approved.")
     else: # Reject
         update_worker_application_status(application_id, 'rejected')
         await context.bot.send_message(
             chat_id=user_id,
             text="❌ Your application was not approved at this time."
         )
-        await safe_edit_message_text(update, f"Application {application_id} rejected.")
+        await safe_edit_message(update, f"Application {application_id} rejected.")
 
 
 async def share_command(update: Update, context: CallbackContext) -> None:
@@ -417,7 +424,7 @@ async def share_command(update: Update, context: CallbackContext) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
-        await safe_edit_message_text(update, SHARE_MESSAGE, reply_markup=reply_markup)
+        await safe_edit_message(update, SHARE_MESSAGE, reply_markup=reply_markup)
     else:
         await update.message.reply_text(SHARE_MESSAGE, reply_markup=reply_markup)
 
@@ -447,7 +454,7 @@ async def ask_for_hall_and_room_number(update: Update, context: CallbackContext)
     """Asks for the user's hall and room number."""
     prompt = "Please enter your hall and room number (e.g., Peter Hall B204):"
     if update.callback_query:
-        await safe_edit_message_text(update, prompt)
+        await safe_edit_message(update, prompt)
     else:
         await update.message.reply_text(prompt)
     return GET_ROOM_NUMBER
@@ -506,7 +513,7 @@ async def view_worker_orders(update: Update, context: CallbackContext) -> int:
     orders = get_worker_orders(worker_id, status)
 
     if not orders:
-        await safe_edit_message_text(update, f"You have no {status} orders.")
+        await safe_edit_message(update, f"You have no {status} orders.")
         return WORKER_HISTORY
 
     message = f"📦 Your {status.capitalize()} Orders:\n"
@@ -514,7 +521,7 @@ async def view_worker_orders(update: Update, context: CallbackContext) -> int:
         _, _, _, food_type, _, _, _, total, order_date, _, _, _, _, _, _ = order
         message += f"📅 {order_date} - {food_type} - ₦{total}\n"
 
-    await safe_edit_message_text(update, message)
+    await safe_edit_message(update, message)
     return WORKER_HISTORY
 
 
@@ -529,7 +536,7 @@ async def take_order(update: Update, context: CallbackContext) -> None:
     order = get_order_by_id(order_id)
     if order and order[10] == 'pending':
         update_order_status(order_id, 'taken', worker_id)
-        await safe_edit_message_text(update, "✅ You have successfully taken this order.")
+        await safe_edit_message(update, "✅ You have successfully taken this order.")
 
         # Notify other workers
         workers = get_all_workers()
@@ -543,7 +550,7 @@ async def take_order(update: Update, context: CallbackContext) -> None:
                 except Exception as e:
                     logger.error(f"Failed to send 'order taken' message to worker {other_worker_id}: {e}")
     else:
-        await safe_edit_message_text(update, "This order has already been taken.")
+        await safe_edit_message(update, "This order has already been taken.")
 
 
 async def indomie_start(update: Update, context: CallbackContext) -> int:
@@ -564,7 +571,7 @@ async def indomie_start(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("Onion and Chicken", callback_data="flavor_onion_chicken")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(update, "Please choose a flavor:", reply_markup=reply_markup)
+    await safe_edit_message(update, "Please choose a flavor:", reply_markup=reply_markup)
     return INDOMIE_FLAVOR
 
 async def indomie_flavor(update: Update, context: CallbackContext) -> int:
@@ -585,7 +592,7 @@ async def indomie_flavor(update: Update, context: CallbackContext) -> int:
             [InlineKeyboardButton("Super Pack (₦500)", callback_data="size_super_500")],
         ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(update, "Please choose a size:", reply_markup=reply_markup)
+    await safe_edit_message(update, "Please choose a size:", reply_markup=reply_markup)
     return INDOMIE_SIZE
 
 async def indomie_size(update: Update, context: CallbackContext) -> int:
@@ -638,7 +645,7 @@ async def indomie_mixings_menu(update: Update, context: CallbackContext) -> int:
 
     message_text = "Please select your mixings:"
     if update.callback_query:
-        await safe_edit_message_text(update, message_text, reply_markup=reply_markup)
+        await safe_edit_message(update, message_text, reply_markup=reply_markup)
     else:
         await update.message.reply_text(message_text, reply_markup=reply_markup)
 
@@ -685,7 +692,7 @@ async def indomie_mixings(update: Update, context: CallbackContext) -> int:
     display_items.extend([mixing.title() for mixing in selected_mixings])
     selected_text = ", ".join(display_items)
 
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         f"Selected mixings: {selected_text}\n\nPlease select your mixings:",
         reply_markup=indomie_mixings_keyboard(),
@@ -764,7 +771,7 @@ async def indomie_toppings_menu(update: Update, context: CallbackContext) -> int
         [InlineKeyboardButton("Done ✅", callback_data="topping_done")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(update, "Please select your toppings:", reply_markup=reply_markup)
+    await safe_edit_message(update, "Please select your toppings:", reply_markup=reply_markup)
     return INDOMIE_TOPPINGS
 
 async def indomie_toppings(update: Update, context: CallbackContext) -> int:
@@ -792,7 +799,7 @@ async def indomie_toppings(update: Update, context: CallbackContext) -> int:
     else:
         selected_toppings.append(item_name)
 
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         f"Selected toppings: {', '.join(selected_toppings).title()}\n\nPlease select your toppings:",
         reply_markup=indomie_toppings_keyboard(),
@@ -864,7 +871,7 @@ async def ask_for_beverages(update: Update, context: CallbackContext) -> int:
     keyboard = beverage_keyboard()
     message = "Would you like any drink or beverage with your order?"
     if update.callback_query:
-        await safe_edit_message_text(update, message, reply_markup=keyboard)
+        await safe_edit_message(update, message, reply_markup=keyboard)
     else:
         await update.message.reply_text(message, reply_markup=keyboard)
     return ASK_BEVERAGE
@@ -926,7 +933,7 @@ async def ask_for_extra_notes(update: Update, context: CallbackContext) -> int:
     
     # We need to handle both callback query and message updates
     if update.callback_query:
-        await safe_edit_message_text(update, message)
+        await safe_edit_message(update, message)
     else:
         # This case happens when the user just entered a quantity
         await update.message.reply_text(message)
@@ -1066,7 +1073,7 @@ async def get_fried_fish_quantity(update: Update, context: CallbackContext) -> i
 
 async def ask_for_delivery_time(update: Update, context: CallbackContext) -> int:
     """Asks for the delivery time."""
-    await safe_edit_message_text(update, "When would you like your order delivered?")
+    await safe_edit_message(update, "When would you like your order delivered?")
     return GET_DELIVERY_TIME
 
 async def handle_beverage_selection(update: Update, context: CallbackContext) -> int:
@@ -1093,7 +1100,7 @@ async def handle_beverage_selection(update: Update, context: CallbackContext) ->
     else:
         selected_beverages.append(item_name)
 
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         f"Selected beverages: {', '.join(selected_beverages).title()}\n\nPlease select your beverages:",
         reply_markup=beverage_keyboard(),
@@ -1110,7 +1117,7 @@ async def custard_start(update: Update, context: CallbackContext) -> int:
         "items": [],
         "selected_additions": [],
     }
-    await safe_edit_message_text(update, "How many custard cups would you like to make?")
+    await safe_edit_message(update, "How many custard cups would you like to make?")
     return CUSTARD_QUANTITY
 
 
@@ -1169,7 +1176,7 @@ async def custard_source(update: Update, context: CallbackContext) -> int:
                 item["total_price"] = 0
 
     keyboard = custard_additions_keyboard()
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         "What would you like to add to your custard?",
         reply_markup=keyboard,
@@ -1216,7 +1223,7 @@ async def custard_additions(update: Update, context: CallbackContext) -> int:
     else:
         selected_additions.append(item_name)
 
-    await safe_edit_message_text(
+    await safe_edit_message(
         update,
         f"Selected additions: {', '.join(selected_additions).title()}\n\nPlease select additions:",
         reply_markup=custard_additions_keyboard(),
@@ -1297,7 +1304,7 @@ async def spaghetti_start(update: Update, context: CallbackContext) -> int:
     await query.answer()
     keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="back_to_kitchen_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(
+    await safe_edit_message(
         update, "Please contact customer care for more info 📞", reply_markup=reply_markup
     )
     return KITCHEN_MENU
@@ -1352,7 +1359,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.callback_query:
-        await safe_edit_message_text(update, summary, reply_markup=reply_markup)
+        await safe_edit_message(update, summary, reply_markup=reply_markup)
     else:
         await update.message.reply_text(summary, reply_markup=reply_markup)
 
@@ -1380,7 +1387,7 @@ async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
     )
     context.user_data["order_id"] = order_id
 
-    await safe_edit_message_text(
+    await safe_edit_message(
         update, "Your order has been saved. Please upload a screenshot of your payment to complete the order."
     )
     return GET_PAYMENT_SCREENSHOT
@@ -1440,7 +1447,7 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
     keyboard = [[InlineKeyboardButton("⬅️ Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await safe_edit_message_text(update, summary, reply_markup=reply_markup)
+    await safe_edit_message(update, summary, reply_markup=reply_markup)
     return ConversationHandler.END
 
 
@@ -1488,7 +1495,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await safe_edit_message_text(update, bill, reply_markup=reply_markup)
+    await safe_edit_message(update, bill, reply_markup=reply_markup)
     return ORDER_SUMMARY
 
 
@@ -1500,7 +1507,7 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
     orders_data = get_user_orders(user_id)
 
     if not orders_data:
-        await safe_edit_message_text(update, "You have no orders yet. Start by placing one 🍽️")
+        await safe_edit_message(update, "You have no orders yet. Start by placing one 🍽️")
         return MAIN_MENU
 
     message = "📦 **Your Past Orders**:\n\n"
@@ -1536,7 +1543,7 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
     keyboard = [[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="main_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await safe_edit_message_text(update, message, reply_markup=reply_markup)
+    await safe_edit_message(update, message, reply_markup=reply_markup)
     return MAIN_MENU
 
 
@@ -1571,7 +1578,7 @@ async def admin_main_menu_callback(update: Update, context: CallbackContext) -> 
         [InlineKeyboardButton("📝 Customer Feedbacks", callback_data="admin_feedback")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await safe_edit_message_text(update, "Welcome Admin 👑 What would you like to manage today?", reply_markup=reply_markup)
+    await safe_edit_message(update, "Welcome Admin 👑 What would you like to manage today?", reply_markup=reply_markup)
     return ADMIN_MENU
 
 
@@ -1607,7 +1614,7 @@ async def admin_orders_menu(update: Update, context: CallbackContext) -> int:
     """Displays the order management menu for admins."""
     query = update.callback_query
     await query.answer()
-    await safe_edit_message_text(update, "📦 Order Management", reply_markup=admin_orders_menu_keyboard())
+    await safe_edit_message(update, "📦 Order Management", reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
 
 def admin_workers_menu_keyboard():
@@ -1622,7 +1629,7 @@ async def admin_workers_menu(update: Update, context: CallbackContext) -> int:
     """Displays the worker management menu for admins."""
     query = update.callback_query
     await query.answer()
-    await safe_edit_message_text(update, "👷‍♂️ Worker Management", reply_markup=admin_workers_menu_keyboard())
+    await safe_edit_message(update, "👷‍♂️ Worker Management", reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
 async def admin_payments_menu(update: Update, context: CallbackContext) -> int:
@@ -1631,7 +1638,7 @@ async def admin_payments_menu(update: Update, context: CallbackContext) -> int:
     await query.answer()
     payments = get_all_payments()
     if not payments:
-        await safe_edit_message_text(update, "No payments found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
+        await safe_edit_message(update, "No payments found.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
 
     for order_id, screenshot_file_id, username, total in payments:
@@ -1664,10 +1671,10 @@ async def view_active_orders_admin(update: Update, context: CallbackContext) -> 
     await query.answer()
     orders_data = get_orders_by_status('pending')
     if not orders_data:
-        await safe_edit_message_text(update, "No active orders yet.", reply_markup=admin_orders_menu_keyboard())
+        await safe_edit_message(update, "No active orders yet.", reply_markup=admin_orders_menu_keyboard())
         return ADMIN_MENU
 
-    await safe_edit_message_text(update, "📦 Active Orders:")
+    await safe_edit_message(update, "📦 Active Orders:")
     for order_tuple in orders_data:
         order_id, _, username, food_type, _, _, _, total, _, _, _, _, _, _, _, _, _, _ = order_tuple
         message = f"ID: {order_id}, User: @{username}, Order: {food_type}, Total: ₦{total}"
@@ -1688,14 +1695,14 @@ async def view_taken_orders_admin(update: Update, context: CallbackContext) -> i
     await query.answer()
     orders_data = get_orders_by_status('taken')
     if not orders_data:
-        await safe_edit_message_text(update, "No taken orders yet.", reply_markup=admin_orders_menu_keyboard())
+        await safe_edit_message(update, "No taken orders yet.", reply_markup=admin_orders_menu_keyboard())
         return ADMIN_MENU
 
     message = "📦 Taken Orders:\n"
     for order_tuple in orders_data:
         order_id, _, username, _, _, _, _, total, _, _, _, worker_id, _, _, _, _, _, _ = order_tuple
         message += f"ID: {order_id}, User: @{username}, Worker: {worker_id}, Total: ₦{total}\n"
-    await safe_edit_message_text(update, message, reply_markup=admin_orders_menu_keyboard())
+    await safe_edit_message(update, message, reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
 
 async def view_all_orders_admin(update: Update, context: CallbackContext) -> int:
@@ -1704,14 +1711,14 @@ async def view_all_orders_admin(update: Update, context: CallbackContext) -> int
     await query.answer()
     orders_data = get_all_orders()
     if not orders_data:
-        await safe_edit_message_text(update, "No placed orders yet.", reply_markup=admin_orders_menu_keyboard())
+        await safe_edit_message(update, "No placed orders yet.", reply_markup=admin_orders_menu_keyboard())
         return ADMIN_MENU
 
     message = "📦 All Orders:\n"
     for order_tuple in orders_data:
         order_id, _, username, _, _, _, _, total, _, _, status, _, _, _, _, _, _, _ = order_tuple
         message += f"ID: {order_id}, User: @{username}, Total: ₦{total}, Status: {status}\n"
-    await safe_edit_message_text(update, message, reply_markup=admin_orders_menu_keyboard())
+    await safe_edit_message(update, message, reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
 
 async def view_workers_admin(update: Update, context: CallbackContext) -> int:
@@ -1720,14 +1727,14 @@ async def view_workers_admin(update: Update, context: CallbackContext) -> int:
     await query.answer()
     workers_data = get_all_workers(active_only=False)
     if not workers_data:
-        await safe_edit_message_text(update, "No registered workers yet.", reply_markup=admin_workers_menu_keyboard())
+        await safe_edit_message(update, "No registered workers yet.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
     message = "👷‍♂️ Approved Workers:\n"
     for worker_tuple in workers_data:
         worker = {"id": worker_tuple[0], "user_id": worker_tuple[1], "name": worker_tuple[2]}
         message += f"Name: {worker['name']}, User ID: {worker['user_id']}\n"
-    await safe_edit_message_text(update, message, reply_markup=admin_workers_menu_keyboard())
+    await safe_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
 async def view_active_applications_admin(update: Update, context: CallbackContext) -> int:
@@ -1736,7 +1743,7 @@ async def view_active_applications_admin(update: Update, context: CallbackContex
     await query.answer()
     applications_data = get_worker_applications(status='pending')
     if not applications_data:
-        await safe_edit_message_text(update, "No active applications.", reply_markup=admin_workers_menu_keyboard())
+        await safe_edit_message(update, "No active applications.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
     for app_tuple in applications_data:
@@ -1762,7 +1769,7 @@ async def handle_admin_order_action(update: Update, context: CallbackContext) ->
 
     order = get_order_by_id(order_id)
     if not order:
-        await safe_edit_message_text(update, "Order not found.")
+        await safe_edit_message(update, "Order not found.")
         return
 
     user_id = order[1]
@@ -1780,7 +1787,7 @@ async def handle_admin_order_action(update: Update, context: CallbackContext) ->
     except Exception as e:
         logger.error(f"Failed to send order status update to user {user_id}: {e}")
 
-    await safe_edit_message_text(update, f"Order #{order_id} has been {new_status}.")
+    await safe_edit_message(update, f"Order #{order_id} has been {new_status}.")
 
 
 async def customer_feedback_start(update: Update, context: CallbackContext) -> int:
@@ -1806,14 +1813,14 @@ async def view_all_applications_admin(update: Update, context: CallbackContext) 
     await query.answer()
     applications_data = get_worker_applications()
     if not applications_data:
-        await safe_edit_message_text(update, "No applications found.", reply_markup=admin_workers_menu_keyboard())
+        await safe_edit_message(update, "No applications found.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
     message = "📋 All Applications:\n"
     for app_tuple in applications_data:
         app = {"id": app_tuple[0], "username": app_tuple[2], "name": app_tuple[3], "status": app_tuple[7]}
         message += f"ID: {app['id']}, Name: {app['name']}, User: @{app['username']}, Status: {app['status']}\n"
-    await safe_edit_message_text(update, message, reply_markup=admin_workers_menu_keyboard())
+    await safe_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
 
@@ -1823,7 +1830,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
     await query.answer()
     feedback_data = get_all_feedback()
     if not feedback_data:
-        await safe_edit_message_text(update, "No customer feedback yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
+        await safe_edit_message(update, "No customer feedback yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
 
     message = "📝 Customer Feedbacks:\n\n"
@@ -1832,7 +1839,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
         message += f"👤 **{feedback['name']}** (@{feedback['username']}) on {feedback['timestamp']}:\n"
         message += f"   - \"{feedback['feedback_text']}\"\n\n"
 
-    await safe_edit_message_text(update, message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
+    await safe_edit_message(update, message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
     return ADMIN_MENU
 
 
@@ -1952,7 +1959,7 @@ async def main() -> None:
                 CallbackQueryHandler(view_all_applications_admin, pattern="^view_all_apps$"),
             ],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("admin", admin_start)],
     )
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
