@@ -137,7 +137,7 @@ async def start(update: Update, context: CallbackContext) -> int:
     """Displays the main menu and logs the user."""
     user = update.effective_user
     add_or_update_user(user.id, user.username, user.first_name)
-    
+
     keyboard = [
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
@@ -233,7 +233,7 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
     order = context.user_data["order"]
-    
+
     delivery_info = {
         "hall_and_room_number": order.get("hall_and_room_number"),
         "delivery_time": order.get("delivery_time"),
@@ -1533,7 +1533,7 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
     for i, order in enumerate(orders_data):
         order_date = order.get('order_date', 'N/A')
         message += f"**Order #{i+1}** - Placed on {order_date}\n"
-        
+
         try:
             items_str = order.get('items', '[]')
             items = json.loads(items_str)
@@ -1543,7 +1543,7 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
                 message += f"  - {name} (x{quantity})\n"
         except (json.JSONDecodeError, TypeError):
             message += "  - Error displaying order details.\n"
-        
+
         total = float(order.get('total', 0))
         message += f"  **Total: ₦{total}**\n\n"
         total_spent += total
@@ -1615,7 +1615,7 @@ async def handle_checkin_broadcast(update: Update, context: CallbackContext) -> 
     query = update.callback_query
     await query.answer("Broadcasting...")
     category = query.data.split("_")[1].upper()
-    
+
     message_list = globals().get(category, [])
     if not message_list:
         await safe_edit_message_text(update, "Error: Message category not found.")
@@ -1623,7 +1623,7 @@ async def handle_checkin_broadcast(update: Update, context: CallbackContext) -> 
 
     message_to_send = random.choice(message_list)
     await broadcast_message(context, message_to_send)
-    
+
     await query.message.reply_text(f"✅ Successfully broadcasted the '{category.title()}' message to all users.")
     return ADMIN_CHECKIN_MENU
 
@@ -1639,7 +1639,7 @@ async def handle_custom_broadcast(update: Update, context: CallbackContext) -> i
     custom_message = update.message.text
     await broadcast_message(context, custom_message)
     await update.message.reply_text("✅ Successfully broadcasted your custom message to all users.")
-    
+
     # After sending, show the check-in menu again
     keyboard = [
         [InlineKeyboardButton("🌧️ Rainy", callback_data="checkin_rainy")],
@@ -2066,19 +2066,24 @@ async def main() -> None:
     async with application:
         webhook_url = os.getenv("WEBHOOK_URL")
         if webhook_url:
-            await application.bot.set_webhook(webhook_url)
-            logger.info(f"Webhook set to {webhook_url}")
-            # Webhook server
+            await application.bot.set_webhook(f"{webhook_url}/{TOKEN}")
+            logger.info(f"Webhook set to {webhook_url}/{TOKEN}")
+        else:
+            logger.warning("WEBHOOK_URL not set. Running in polling mode.")
+            await application.run_polling()
+            return
+
         async def telegram_handle(request):
             logger.info("Received a POST request from Telegram.")
-            await application.update_queue.put(Update.de_json(await request.json(), application.bot))
+            update = Update.de_json(await request.json(), application.bot)
+            await application.process_update(update)
             return web.Response()
 
         async def health_check(_):
             return web.Response(text="OK")
 
         app = web.Application()
-        app.router.add_post("/", telegram_handle)
+        app.router.add_post(f"/{TOKEN}", telegram_handle)
         app.router.add_get("/", health_check)
 
         runner = web.AppRunner(app)
