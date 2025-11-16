@@ -10,7 +10,6 @@ import os
 from urllib.parse import quote
 
 from aiohttp import web
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -22,14 +21,17 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-from database import (
-    init_db, add_order, get_user_orders, get_todays_orders, get_all_orders,
+from sheets_db import (
+    add_order, get_user_orders, get_all_orders,
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
     add_worker_application, get_worker_applications, update_worker_application_status,
-    get_all_payments, add_feedback, get_all_feedback, get_orders_by_status
+    add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
+    add_or_update_user
 )
-from messages import DAILY_MESSAGES, SHARE_MESSAGE
+from messages import (
+    SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL
+)
 
 # Centralized price list for all items
 PRICES = {
@@ -126,11 +128,16 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_WATER_QUANTITY,
     ASK_BEVERAGE,
     GET_EXTRA_NOTES,
-) = range(41)
+    ADMIN_CHECKIN_MENU,
+    ADMIN_CUSTOM_MESSAGE_PROMPT,
+) = range(43)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
-    """Displays the main menu."""
+    """Displays the main menu and logs the user."""
+    user = update.effective_user
+    add_or_update_user(user.id, user.username, user.first_name)
+
     keyboard = [
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
@@ -222,32 +229,33 @@ async def cafe_order_done(update: Update, context: CallbackContext) -> int:
 
 
 async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
-    """Saves the cafe order to the database."""
+    """Saves the cafe order to the Google Sheet."""
     query = update.callback_query
     await query.answer()
     order = context.user_data["order"]
+
+    delivery_info = {
+        "hall_and_room_number": order.get("hall_and_room_number"),
+        "delivery_time": order.get("delivery_time"),
+    }
+
     order_id = add_order(
         user_id=update.effective_user.id,
         username=update.effective_user.username,
         food_type=order["food"],
-        mixings=None,
-        toppings=None,
-        quantities=order["quantities"],
+        items=order.get("items", []),
         total=order["total"],
-        source="cafe",
-        hall_and_room_number=order["hall_and_room_number"],
-        delivery_time=order["delivery_time"],
-        service_charge=order["service_charge"],
+        status='pending',
+        delivery_info=delivery_info,
+        notes=order.get("notes")
     )
 
-    # Notify workers
     await notify_workers(context, order_id)
 
     summary = "✅ Your order has been successfully placed!\n\n"
     summary += "Here’s your order summary:\n"
-    summary += f"• {order['food']} x{order['quantities']['quantity']}\n"
-    summary += f"Amount: ₦{order['quantities']['price']}\n"
-    summary += f"Service Charge: ₦{order['service_charge']}\n"
+    for item in order.get("items", []):
+        summary += f"• {item.get('name', 'N/A')} x{item.get('quantity', 0)}\n"
     summary += f"Total: ₦{order['total']}\n\n"
     summary += f"Delivery to: {order['hall_and_room_number']}\n"
     summary += f"Delivery time: {order['delivery_time']}\n\n"
@@ -267,9 +275,11 @@ async def notify_workers(context: CallbackContext, order_id: int):
     if not order:
         return
 
-    _, _, username, food_type, _, _, _, total, _, source, _, _, _, _, _ = order
+    username = order.get('username', 'N/A')
+    food_type = order.get('food_type', 'N/A')
+    total = order.get('total', 0)
+    notes = order.get('notes')
 
-    notes = order[17]
     message = (
         f"📦 New Order Available:\n"
         f"From: @{username}\n"
@@ -282,11 +292,13 @@ async def notify_workers(context: CallbackContext, order_id: int):
     keyboard = [[InlineKeyboardButton("✅ Take This Order", callback_data=f"take_{order_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    for worker_id in workers:
-        try:
-            await context.bot.send_message(chat_id=worker_id, text=message, reply_markup=reply_markup)
-        except Exception as e:
-            logger.error(f"Failed to send message to worker {worker_id}: {e}")
+    for worker in workers:
+        worker_id = worker.get('user_id')
+        if worker_id:
+            try:
+                await context.bot.send_message(chat_id=worker_id, text=message, reply_markup=reply_markup)
+            except Exception as e:
+                logger.error(f"Failed to send message to worker {worker_id}: {e}")
 
 
 async def work_with_us(update: Update, context: CallbackContext) -> int:
@@ -361,38 +373,37 @@ async def worker_phone(update: Update, context: CallbackContext) -> int:
 
 
 async def handle_worker_approval(update: Update, context: CallbackContext) -> None:
-    """Handles the admin's decision on a worker application from the admin panel."""
+    """Handles the admin's decision on a worker application."""
     query = update.callback_query
     await query.answer()
 
     action, app_id_str = query.data.split("_")
     application_id = int(app_id_str)
 
-    # Retrieve application from DB
     apps = get_worker_applications()
-    application_data = next((app for app in apps if app[0] == application_id), None)
+    application_data = next((app for app in apps if app.get('application_id') == application_id), None)
 
     if not application_data:
         await safe_edit_message_text(update, "Application not found.")
         return
 
-    user_id = application_data[1]
+    user_id = application_data.get('user_id')
 
     if action == "approve":
         update_worker_application_status(application_id, 'approved')
         add_worker(
             user_id=user_id,
-            name=application_data[3],
-            reg_no=application_data[4],
-            matric_no=application_data[5],
-            phone=application_data[6],
+            name=application_data.get('name'),
+            reg_no=application_data.get('reg_no'),
+            matric_no=application_data.get('matric_no'),
+            phone=application_data.get('phone'),
         )
         await context.bot.send_message(
             chat_id=user_id,
             text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker."
         )
         await safe_edit_message_text(update, f"Application {application_id} approved.")
-    else: # Reject
+    else:  # Reject
         update_worker_application_status(application_id, 'rejected')
         await context.bot.send_message(
             chat_id=user_id,
@@ -511,7 +522,9 @@ async def view_worker_orders(update: Update, context: CallbackContext) -> int:
 
     message = f"📦 Your {status.capitalize()} Orders:\n"
     for order in orders:
-        _, _, _, food_type, _, _, _, total, order_date, _, _, _, _, _, _ = order
+        food_type = order.get('food_type', 'N/A')
+        total = order.get('total', 0)
+        order_date = order.get('order_date', 'N/A')
         message += f"📅 {order_date} - {food_type} - ₦{total}\n"
 
     await safe_edit_message_text(update, message)
@@ -527,14 +540,15 @@ async def take_order(update: Update, context: CallbackContext) -> None:
     worker_id = update.effective_user.id
 
     order = get_order_by_id(order_id)
-    if order and order[10] == 'pending':
+    if order and order.get('status') == 'pending':
         update_order_status(order_id, 'taken', worker_id)
         await safe_edit_message_text(update, "✅ You have successfully taken this order.")
 
         # Notify other workers
         workers = get_all_workers()
-        for other_worker_id in workers:
-            if other_worker_id != worker_id:
+        for worker in workers:
+            other_worker_id = worker.get('user_id')
+            if other_worker_id and other_worker_id != worker_id:
                 try:
                     await context.bot.send_message(
                         chat_id=other_worker_id,
@@ -1365,18 +1379,20 @@ async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
     await query.answer()
     order = context.user_data["order"]
 
-    # The 'quantities' field in the database will now store the list of item dicts.
+    delivery_info = {
+        "hall_and_room_number": order.get("hall_and_room_number"),
+        "delivery_time": order.get("delivery_time"),
+    }
+
     order_id = add_order(
         user_id=update.effective_user.id,
         username=update.effective_user.username,
         food_type=order["food"],
-        mixings=json.dumps(order.get("selected_mixings", [])),
-        toppings=json.dumps(order.get("selected_toppings", [])),
-        quantities=json.dumps(order.get("items", [])),  # Storing the detailed items list
+        items=order.get("items", []),
         total=order["total"],
-        hall_and_room_number=order.get("hall_and_room_number"),
-        delivery_time=order.get("delivery_time"),
-        status='pending_payment'
+        status='pending_payment',
+        delivery_info=delivery_info,
+        notes=order.get("notes")
     )
     context.user_data["order_id"] = order_id
 
@@ -1393,8 +1409,13 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
         await update.message.reply_text("Something went wrong. Please try placing your order again.")
         return ConversationHandler.END
 
-    # Assuming add_payment function exists and works as intended
-    # add_payment(order_id, update.message.photo[-1].file_id)
+    order = get_order_by_id(order_id)
+    add_payment(
+        order_id,
+        update.message.photo[-1].file_id,
+        update.effective_user.username,
+        order.get('total', 0) if order else 0
+    )
     update_order_status(order_id, 'pending')
 
     await notify_workers(context, order_id)
@@ -1407,21 +1428,25 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
 
 
 async def confirm_order(update: Update, context: CallbackContext) -> int:
-    """Saves the order to the database."""
+    """Saves the order to the Google Sheet."""
     query = update.callback_query
     await query.answer()
     order = context.user_data["order"]
+
+    delivery_info = {
+        "hall_and_room_number": order.get("hall_and_room_number"),
+        "delivery_time": order.get("delivery_time"),
+    }
 
     order_id = add_order(
         user_id=update.effective_user.id,
         username=update.effective_user.username,
         food_type=order["food"],
-        mixings=json.dumps(order.get("selected_mixings", [])),
-        toppings=json.dumps(order.get("selected_toppings", [])),
-        quantities=json.dumps(order.get("items", [])),
+        items=order.get("items", []),
         total=order["total"],
-        hall_and_room_number=order.get("hall_and_room_number"),
-        delivery_time=order.get("delivery_time"),
+        status='pending',
+        delivery_info=delivery_info,
+        notes=order.get("notes")
     )
 
     await notify_workers(context, order_id)
@@ -1493,7 +1518,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
 
 
 async def view_orders(update: Update, context: CallbackContext) -> int:
-    """Displays the user's past orders from the new data structure."""
+    """Displays the user's past orders from the Google Sheet."""
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
@@ -1505,21 +1530,13 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
 
     message = "📦 **Your Past Orders**:\n\n"
     total_spent = 0
-    for i, order_tuple in enumerate(orders_data):
-        order = {
-            "id": order_tuple[0], "user_id": order_tuple[1], "username": order_tuple[2],
-            "food_type": order_tuple[3], "mixings": order_tuple[4], "toppings": order_tuple[5],
-            "quantities": order_tuple[6], "total": order_tuple[7], "order_date": order_tuple[8],
-            "source": order_tuple[9], "status": order_tuple[10], "taken_by": order_tuple[11],
-            "hall_and_room_number": order_tuple[12], "delivery_time": order_tuple[13],
-            "service_charge": order_tuple[14], "flavor": order_tuple[15], "size": order_tuple[16],
-            "notes": order_tuple[17]
-        }
-
-        message += f"**Order #{i+1}** - Placed on {order['order_date']}\n"
+    for i, order in enumerate(orders_data):
+        order_date = order.get('order_date', 'N/A')
+        message += f"**Order #{i+1}** - Placed on {order_date}\n"
 
         try:
-            items = json.loads(order['quantities'])
+            items_str = order.get('items', '[]')
+            items = json.loads(items_str)
             for item in items:
                 name = item.get("name", "Unknown Item").title()
                 quantity = item.get("quantity", 0)
@@ -1527,8 +1544,9 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
         except (json.JSONDecodeError, TypeError):
             message += "  - Error displaying order details.\n"
 
-        message += f"  **Total: ₦{order['total']}**\n\n"
-        total_spent += order['total']
+        total = float(order.get('total', 0))
+        message += f"  **Total: ₦{total}**\n\n"
+        total_spent += total
 
     message += "-------------------\n"
     message += f"**Total Spent: ₦{total_spent}**"
@@ -1569,10 +1587,81 @@ async def admin_main_menu_callback(update: Update, context: CallbackContext) -> 
         [InlineKeyboardButton("👷‍♂️ Workers", callback_data="admin_workers")],
         [InlineKeyboardButton("💳 Payments", callback_data="admin_payments")],
         [InlineKeyboardButton("📝 Customer Feedbacks", callback_data="admin_feedback")],
+        [InlineKeyboardButton("📣 Customer Check-ins", callback_data="admin_checkin")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await safe_edit_message_text(update, "Welcome Admin 👑 What would you like to manage today?", reply_markup=reply_markup)
     return ADMIN_MENU
+
+async def admin_checkin_menu(update: Update, context: CallbackContext) -> int:
+    """Shows the customer check-in message categories."""
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("🌧️ Rainy", callback_data="checkin_rainy")],
+        [InlineKeyboardButton("🥶 Cold", callback_data="checkin_cold")],
+        [InlineKeyboardButton("☀️ Hot", callback_data="checkin_hot")],
+        [InlineKeyboardButton("🗓️ Sunday", callback_data="checkin_sunday")],
+        [InlineKeyboardButton("💬 Casual", callback_data="checkin_casual")],
+        [InlineKeyboardButton("✍️ Custom", callback_data="checkin_custom")],
+        [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await safe_edit_message_text(update, "Select a category to send a check-in message to all users:", reply_markup=reply_markup)
+    return ADMIN_CHECKIN_MENU
+
+async def handle_checkin_broadcast(update: Update, context: CallbackContext) -> int:
+    """Handles broadcasting a message from a predefined category."""
+    query = update.callback_query
+    await query.answer("Broadcasting...")
+    category = query.data.split("_")[1].upper()
+
+    message_list = globals().get(category, [])
+    if not message_list:
+        await safe_edit_message_text(update, "Error: Message category not found.")
+        return ADMIN_CHECKIN_MENU
+
+    message_to_send = random.choice(message_list)
+    await broadcast_message(context, message_to_send)
+
+    await query.message.reply_text(f"✅ Successfully broadcasted the '{category.title()}' message to all users.")
+    return ADMIN_CHECKIN_MENU
+
+async def admin_custom_message_prompt(update: Update, context: CallbackContext) -> int:
+    """Prompts the admin to enter a custom message."""
+    query = update.callback_query
+    await query.answer()
+    await safe_edit_message_text(update, "Please type the custom message you want to send to all users.")
+    return ADMIN_CUSTOM_MESSAGE_PROMPT
+
+async def handle_custom_broadcast(update: Update, context: CallbackContext) -> int:
+    """Broadcasts the custom message provided by the admin."""
+    custom_message = update.message.text
+    await broadcast_message(context, custom_message)
+    await update.message.reply_text("✅ Successfully broadcasted your custom message to all users.")
+
+    # After sending, show the check-in menu again
+    keyboard = [
+        [InlineKeyboardButton("🌧️ Rainy", callback_data="checkin_rainy")],
+        [InlineKeyboardButton("🥶 Cold", callback_data="checkin_cold")],
+        [InlineKeyboardButton("☀️ Hot", callback_data="checkin_hot")],
+        [InlineKeyboardButton("🗓️ Sunday", callback_data="checkin_sunday")],
+        [InlineKeyboardButton("💬 Casual", callback_data="checkin_casual")],
+        [InlineKeyboardButton("✍️ Custom", callback_data="checkin_custom")],
+        [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Select another category or go back:", reply_markup=reply_markup)
+    return ADMIN_CHECKIN_MENU
+
+async def broadcast_message(context: CallbackContext, message: str):
+    """Fetches all users from the sheet and sends them a message."""
+    user_ids = get_all_unique_users()
+    for user_id in user_ids:
+        try:
+            await context.bot.send_message(chat_id=user_id, text=message)
+        except Exception as e:
+            logger.error(f"Failed to send broadcast to user {user_id}: {e}")
 
 
 async def admin_password(update: Update, context: CallbackContext) -> int:
@@ -1647,29 +1736,22 @@ async def admin_payments_menu(update: Update, context: CallbackContext) -> int:
     return ADMIN_MENU
 
 
-async def send_daily_messages(bot):
-    """Sends a daily message to all unique users."""
-    user_ids = get_all_unique_users()
-    message = random.choice(DAILY_MESSAGES)
-    for user_id in user_ids:
-        try:
-            await bot.send_message(chat_id=user_id, text=message)
-        except Exception as e:
-            logger.error(f"Failed to send daily message to user {user_id}: {e}")
-
 # New admin functions
 async def view_active_orders_admin(update: Update, context: CallbackContext) -> int:
     """Displays active (pending) orders to the admin with action buttons."""
     query = update.callback_query
     await query.answer()
-    orders_data = get_orders_by_status('pending')
+    orders_data = get_orders_by_status(('pending', 'pending_payment'))
     if not orders_data:
         await safe_edit_message_text(update, "No active orders yet.", reply_markup=admin_orders_menu_keyboard())
         return ADMIN_MENU
 
     await safe_edit_message_text(update, "📦 Active Orders:")
-    for order_tuple in orders_data:
-        order_id, _, username, food_type, _, _, _, total, _, _, _, _, _, _, _, _, _, _ = order_tuple
+    for order in orders_data:
+        order_id = order.get('order_id')
+        username = order.get('username')
+        food_type = order.get('food_type')
+        total = order.get('total')
         message = f"ID: {order_id}, User: @{username}, Order: {food_type}, Total: ₦{total}"
         keyboard = [
             [
@@ -1692,8 +1774,11 @@ async def view_taken_orders_admin(update: Update, context: CallbackContext) -> i
         return ADMIN_MENU
 
     message = "📦 Taken Orders:\n"
-    for order_tuple in orders_data:
-        order_id, _, username, _, _, _, _, total, _, _, _, worker_id, _, _, _, _, _, _ = order_tuple
+    for order in orders_data:
+        order_id = order.get('order_id')
+        username = order.get('username')
+        total = order.get('total')
+        worker_id = order.get('taken_by')
         message += f"ID: {order_id}, User: @{username}, Worker: {worker_id}, Total: ₦{total}\n"
     await safe_edit_message_text(update, message, reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
@@ -1708,8 +1793,11 @@ async def view_all_orders_admin(update: Update, context: CallbackContext) -> int
         return ADMIN_MENU
 
     message = "📦 All Orders:\n"
-    for order_tuple in orders_data:
-        order_id, _, username, _, _, _, _, total, _, _, status, _, _, _, _, _, _, _ = order_tuple
+    for order in orders_data:
+        order_id = order.get('order_id')
+        username = order.get('username')
+        total = order.get('total')
+        status = order.get('status')
         message += f"ID: {order_id}, User: @{username}, Total: ₦{total}, Status: {status}\n"
     await safe_edit_message_text(update, message, reply_markup=admin_orders_menu_keyboard())
     return ADMIN_MENU
@@ -1724,9 +1812,8 @@ async def view_workers_admin(update: Update, context: CallbackContext) -> int:
         return ADMIN_MENU
 
     message = "👷‍♂️ Approved Workers:\n"
-    for worker_tuple in workers_data:
-        worker = {"id": worker_tuple[0], "user_id": worker_tuple[1], "name": worker_tuple[2]}
-        message += f"Name: {worker['name']}, User ID: {worker['user_id']}\n"
+    for worker in workers_data:
+        message += f"Name: {worker.get('name')}, User ID: {worker.get('user_id')}\n"
     await safe_edit_message_text(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
@@ -1739,13 +1826,13 @@ async def view_active_applications_admin(update: Update, context: CallbackContex
         await safe_edit_message_text(update, "No active applications.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
-    for app_tuple in applications_data:
-        app = {"id": app_tuple[0], "username": app_tuple[2], "name": app_tuple[3], "phone": app_tuple[6]}
-        message = f"App ID: {app['id']}, Name: {app['name']}, User: @{app['username']}, Phone: {app['phone']}"
+    for app in applications_data:
+        app_id = app.get('application_id')
+        message = f"App ID: {app_id}, Name: {app.get('name')}, User: @{app.get('username')}, Phone: {app.get('phone')}"
         keyboard = [
             [
-                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{app['id']}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{app['id']}"),
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{app_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{app_id}"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1765,7 +1852,7 @@ async def handle_admin_order_action(update: Update, context: CallbackContext) ->
         await safe_edit_message_text(update, "Order not found.")
         return
 
-    user_id = order[1]
+    user_id = order.get('user_id')
     new_status = 'accepted' if action == 'accept' else 'rejected'
 
     update_order_status(order_id, new_status)
@@ -1810,9 +1897,8 @@ async def view_all_applications_admin(update: Update, context: CallbackContext) 
         return ADMIN_MENU
 
     message = "📋 All Applications:\n"
-    for app_tuple in applications_data:
-        app = {"id": app_tuple[0], "username": app_tuple[2], "name": app_tuple[3], "status": app_tuple[7]}
-        message += f"ID: {app['id']}, Name: {app['name']}, User: @{app['username']}, Status: {app['status']}\n"
+    for app in applications_data:
+        message += f"ID: {app.get('application_id')}, Name: {app.get('name')}, User: @{app.get('username')}, Status: {app.get('status')}\n"
     await safe_edit_message_text(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
@@ -1827,10 +1913,9 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
         return ADMIN_MENU
 
     message = "📝 Customer Feedbacks:\n\n"
-    for feedback_tuple in feedback_data:
-        feedback = {"username": feedback_tuple[2], "name": feedback_tuple[3], "feedback_text": feedback_tuple[4], "timestamp": feedback_tuple[5]}
-        message += f"👤 **{feedback['name']}** (@{feedback['username']}) on {feedback['timestamp']}:\n"
-        message += f"   - \"{feedback['feedback_text']}\"\n\n"
+    for feedback in feedback_data:
+        message += f"👤 **{feedback.get('name')}** (@{feedback.get('username')}) on {feedback.get('timestamp')}:\n"
+        message += f"   - \"{feedback.get('feedback_text')}\"\n\n"
 
     await safe_edit_message_text(update, message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")]]))
     return ADMIN_MENU
@@ -1838,9 +1923,6 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
 
 async def main() -> None:
     """Start the bot."""
-    # Initialize the database
-    init_db()
-
     application = Application.builder().token(TOKEN).build()
 
     worker_conv_handler = ConversationHandler(
@@ -1950,9 +2032,18 @@ async def main() -> None:
                 CallbackQueryHandler(view_workers_admin, pattern="^view_workers_admin$"),
                 CallbackQueryHandler(view_active_applications_admin, pattern="^view_active_apps$"),
                 CallbackQueryHandler(view_all_applications_admin, pattern="^view_all_apps$"),
+                CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
+            ],
+            ADMIN_CHECKIN_MENU: [
+                CallbackQueryHandler(handle_checkin_broadcast, pattern="^checkin_(rainy|cold|hot|sunday|casual)$"),
+                CallbackQueryHandler(admin_custom_message_prompt, pattern="^checkin_custom$"),
+                CallbackQueryHandler(admin_main_menu_callback, pattern="^admin_main_menu$"),
+            ],
+            ADMIN_CUSTOM_MESSAGE_PROMPT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_broadcast)
             ],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("admin", admin_start)],
     )
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
@@ -1972,18 +2063,12 @@ async def main() -> None:
 
     application.add_error_handler(error_handler)
 
-    # Scheduler for daily messages
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(send_daily_messages, 'interval', hours=6, args=[application.bot])
-
     async with application:
         webhook_url = os.getenv("WEBHOOK_URL")
-        await application.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
-        scheduler.start()
-        await application.start()
-
-        # Webhook server
+        if webhook_url:
+            await application.bot.set_webhook(webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+            # Webhook server
         async def telegram_handle(request):
             logger.info("Received a POST request from Telegram.")
             await application.update_queue.put(Update.de_json(await request.json(), application.bot))
