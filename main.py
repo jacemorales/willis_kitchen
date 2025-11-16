@@ -623,7 +623,7 @@ async def indomie_quantity(update: Update, context: CallbackContext) -> int:
         if item.get("type") == "base":
             item["quantity"] = quantity
             break
-    
+
     # Skip flavor and size, go to mixings
     return await indomie_mixings_menu(update, context)
 
@@ -668,7 +668,7 @@ async def indomie_size(update: Update, context: CallbackContext) -> int:
 
     # Get the quantity, which is 1 if the kitchen is providing it.
     quantity = 1
-    
+
     items.append({
         "name": item_name,
         "type": "base",
@@ -699,7 +699,7 @@ async def indomie_kitchen_quantity(update: Update, context: CallbackContext) -> 
             item["quantity"] = quantity
             item["total_price"] = item["unit_price"] * quantity
             break
-    
+
     return await indomie_mixings_menu(update, context)
 
 
@@ -1226,7 +1226,7 @@ async def custard_source(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
     source = query.data.split("_")[-1]  # 'own' or 'kitchen'
-    
+
     unit_price = PRICES.get("custard", 0)
     if source == 'own':
         unit_price = 0
@@ -1434,13 +1434,13 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     # Add notes to the summary if they exist
     if order.get("notes"):
-        summary += f"*Notes:* {order['notes']}\n"
+        summary += f"<b>Notes:</b> {order['notes']}\n"
 
     summary += "----------------------\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
     summary += "Pay Online:\n"
     summary += "https://pay-naira.netlify.app\n"
-    summary += "<small><i>open link in browser</i></small>"
+    summary += "<i>open link in browser</i>"
 
     keyboard = [
         [
@@ -1577,7 +1577,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
             if "indomie" in name or "custard" in name:
                 service_charge += item.get("quantity", 0) * 250
     total = subtotal + service_charge
-    
+
     bill += f"Service Charge: ₦{service_charge}\n"
     bill += "----------------------\n"
     bill += f"💰 <b>Total = ₦{total}</b>"
