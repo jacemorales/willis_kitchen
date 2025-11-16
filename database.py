@@ -184,14 +184,14 @@ def get_orders_by_status(status):
     """Retrieves all orders with a specific status or statuses."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
+
     if isinstance(status, tuple):
         query = f"SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE status IN ({','.join('?' for _ in status)}) ORDER BY order_date DESC"
         cursor.execute(query, status)
     else:
         query = "SELECT id, user_id, username, food_type, mixings, toppings, quantities, total, order_date, source, status, taken_by, hall_and_room_number, delivery_time, service_charge, flavor, size, notes FROM orders WHERE status = ? ORDER BY order_date DESC"
         cursor.execute(query, (status,))
-        
+
     orders = cursor.fetchall()
     conn.close()
     return orders
