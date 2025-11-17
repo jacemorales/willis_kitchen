@@ -4,4 +4,3 @@ __pycache__/
 *.log
 credentials.json
 dummy_credentials.json
-service_account.json

@@ -1,29 +1,38 @@
 import gspread
+import os
 import json
+from google.oauth2.service_account import Credentials
 from google.auth.exceptions import RefreshError
 
 def get_sheets_client():
     """
     Initializes and returns an authorized gspread client.
 
-    Authenticates using credentials from a file named 'service_account.json'.
+    Authenticates using service account credentials stored in the
+    GOOGLE_CREDENTIALS environment variable.
     """
     try:
+        creds_json_str = os.getenv("GOOGLE_CREDENTIALS")
+        if not creds_json_str:
+            print("CRITICAL: GOOGLE_CREDENTIALS environment variable not set.")
+            return None
+
+        creds_dict = json.loads(creds_json_str)
+
         scopes = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
 
-        client = gspread.service_account(filename="service_account.json", scopes=scopes)
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+
         return client
-    except FileNotFoundError:
-        print("CRITICAL: 'service_account.json' not found. Please create this file with your Google Cloud service account credentials.")
-        return None
     except json.JSONDecodeError:
-        print("CRITICAL: Could not decode 'service_account.json'. The file may be corrupt or improperly formatted.")
+        print("CRITICAL: Failed to parse GOOGLE_CREDENTIALS. Make sure it's a valid JSON string.")
         return None
     except RefreshError as e:
-        print(f"CRITICAL: The credentials in 'service_account.json' are invalid. Please check the file and ensure it is correct. Details: {e}")
+        print(f"CRITICAL: The credentials in GOOGLE_CREDENTIALS are invalid. Please check the value. Details: {e}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred while setting up Google Sheets client: {e}")
