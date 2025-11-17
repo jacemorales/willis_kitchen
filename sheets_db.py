@@ -1,5 +1,6 @@
 import gspread
 import json
+import sys
 from datetime import datetime
 import time
 from gspread_client import get_sheets_client
@@ -10,6 +11,10 @@ SPREADSHEET_NAME = "WillisKitchenBot_DB"
 
 # Initialize client and open the spreadsheet
 client = get_sheets_client()
+if client is None:
+    print("Failed to connect to Google Sheets. Please check your credentials.")
+    sys.exit(1)
+    
 spreadsheet = client.open(SPREADSHEET_NAME)
 
 # Get individual worksheets
