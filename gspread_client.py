@@ -1,5 +1,6 @@
 import gspread
 import json
+from google.auth.exceptions import RefreshError
 
 def get_sheets_client():
     """
@@ -20,6 +21,9 @@ def get_sheets_client():
         return None
     except json.JSONDecodeError:
         print("CRITICAL: Could not decode 'service_account.json'. The file may be corrupt or improperly formatted.")
+        return None
+    except RefreshError as e:
+        print(f"CRITICAL: The credentials in 'service_account.json' are invalid. Please check the file and ensure it is correct. Details: {e}")
         return None
     except Exception as e:
         print(f"An unexpected error occurred while setting up Google Sheets client: {e}")
