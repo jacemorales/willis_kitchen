@@ -1,5 +1,6 @@
 import gspread
 import json
+import sys
 from datetime import datetime
 import time
 from gspread_client import get_sheets_client
@@ -10,6 +11,10 @@ SPREADSHEET_NAME = "WillisKitchenBot_DB"
 
 # Initialize client and open the spreadsheet
 client = get_sheets_client()
+if client is None:
+    print("Failed to connect to Google Sheets. Please check your credentials.")
+    sys.exit(1)
+
 spreadsheet = client.open(SPREADSHEET_NAME)
 
 # Get individual worksheets
@@ -27,7 +32,7 @@ def add_or_update_user(user_id, username, first_name):
         # User exists, update last_login
         now = datetime.now().isoformat()
         users_sheet.update_cell(cell.row, 4, now)
-    except (gspread.exceptions.CellNotFound, AttributeError):
+    except AttributeError:
         # User does not exist, add new row
         now = datetime.now().isoformat()
         new_row = [user_id, username, first_name, now]
@@ -79,7 +84,7 @@ def get_order_by_id(order_id):
         row_values = orders_sheet.row_values(cell.row)
         headers = orders_sheet.row_values(1)
         return dict(zip(headers, row_values))
-    except (gspread.exceptions.CellNotFound, AttributeError):
+    except AttributeError:
         return None
 
 def update_order_status(order_id, status, worker_id=None):
@@ -90,7 +95,7 @@ def update_order_status(order_id, status, worker_id=None):
         orders_sheet.update_cell(cell.row, 8, status)
         if worker_id:
             orders_sheet.update_cell(cell.row, 11, worker_id)
-    except (gspread.exceptions.CellNotFound, AttributeError):
+    except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 
 def add_worker_application(user_id, username, name, reg_no, matric_no, phone):
@@ -112,7 +117,7 @@ def update_worker_application_status(application_id, status):
         cell = worker_applications_sheet.find(str(application_id), in_column=1)
         # Column 8 is 'status'
         worker_applications_sheet.update_cell(cell.row, 8, status)
-    except (gspread.exceptions.CellNotFound, AttributeError):
+    except AttributeError:
         print(f"Error: Application ID {application_id} not found.")
 
 def add_worker(user_id, name, reg_no, matric_no, phone):

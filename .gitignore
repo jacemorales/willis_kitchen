@@ -1,1 +1,7 @@
 kitchen_bot.db
+__pycache__/
+*.pyc
+*.log
+credentials.json
+dummy_credentials.json
+service_account.json
