@@ -18,41 +18,31 @@ https://t.me/WillisNoodlesBot
 
 # Customer Check-in Messages
 RAINY = [
-    "Don't let the rain get you down! 🌧️ A warm plate of Indomie is the perfect comfort food for a day like today. Order now and we'll bring it right to you!",
-    "It's cozy weather! Perfect for staying in and enjoying a delicious meal. Let us handle the cooking. What are you craving?",
-    "Rainy days call for warm treats. How about some hot custard or a custom-made spaghetti? Let us brighten your day!",
-    "Stuck inside because of the rain? No problem! We deliver. Check out our menu and get your favorites delivered to your doorstep.",
-    "The weather outside is frightful, but our food is so delightful! 🎶 Order something tasty and make it a great day indoors."
+    "🌧️ Don't let the gloomy weather get you down! Brighten up your day with a steaming hot plate of our signature Indomie, cooked to perfection just for you. 🍜 Imagine the warmth and flavor chasing away the chill. Why go out when the best comfort food can come directly to you? Order now and let us bring a little sunshine to your room! ☀️",
+    "It's the perfect weather to get cozy and treat yourself! 🛌 Forget about cooking in the cold – let us handle it. Picture this: you, warm in your room, with a delicious meal of your choice arriving at your door. Whether it's spicy noodles or creamy custard, we've got the perfect dish to make your day. What are you craving? 🤔",
+    "The sound of rain is so relaxing... and it's even better with a hot meal! ☔️ Our kitchen is fired up and ready to create something amazing for you. From fully-loaded Indomie to our sweet, warm custard, we deliver happiness. Place an order and make this rainy day a delicious one! 😋"
 ]
 
 COLD = [
-    "Brrr, it's a cold one today! 🥶 Warm up with a steaming hot bowl of noodles, made just the way you like it. Place your order now!",
-    "Feeling the chill? A hot meal is the best remedy. Let us prepare something delicious for you to warm you up from the inside out.",
-    "Cold days are better with hot food. Whether it's spicy Indomie or creamy custard, we've got what you need to stay warm and satisfied.",
-    "Don't face the cold on an empty stomach! Order a hearty meal from our kitchen and feel the warmth.",
-    "It's the perfect weather to treat yourself to something comforting. How about a hot meal delivered right to your door?"
+    "Brrr, feeling that chilly breeze? 🥶 It's the perfect time to warm up from the inside out! A hot, savory bowl of our custom-made Indomie is like a warm hug in a bowl. 🤗 Don't shiver, just order! We'll make sure you get a meal that's both hearty and heartwarming. 🔥",
+    "The temperature is dropping, but our kitchen is heating up! 🔥 Beat the cold with a meal that packs a punch. Our spicy noodles are guaranteed to bring the heat, or perhaps a rich, creamy custard to warm your soul? Don't let the cold win – order your perfect warm-up meal now! 💪",
+    "Cold days call for comfort food, and we're the experts! 🧑‍🍳 Why not treat yourself to a delicious, hassle-free meal? No need to step out into the cold. We'll bring your order right to your doorstep, hot and ready to enjoy. Your cozy, delicious evening is just a few taps away. 📲"
 ]
 
 HOT = [
-    "It's a hot day! ☀️ Stay cool and hydrated. Don't worry about cooking in the heat – let us handle it! Order a refreshing drink with your meal.",
-    "The sun is out, and so is our full menu! Get your favorite meal without breaking a sweat. We'll prepare it for you.",
-    "Too hot to cook? We've got you covered. Place an order for something delicious and enjoy the cool comfort of your room.",
-    "Stay energized in this heat with a satisfying meal from Willis Kitchen. Quick, easy, and no cooking required!",
-    "Beat the heat with a cool drink and a tasty meal. Check out our beverage options when you place your order!"
+    "☀️ It's a scorcher out there! Don't even think about turning on a stove. Stay cool, stay hydrated, and let us handle lunch. 🧊 Order a delicious meal and pair it with an ice-cold beverage from our café. We'll bring it right to you, so you can relax in the cool comfort of your room. 😎",
+    "Feeling the heat? 🔥 Beat the kitchen heat and let us do the cooking for you! A fresh, tasty meal is the perfect way to refuel on a hot day. Plus, you can add a refreshing drink to your order to really cool down. Why sweat when you can order? 💧",
+    "The sun is shining and your next delicious meal is just an order away! 🌞 Keep your energy up without the hassle of cooking. Whether you're craving something light or a full, satisfying meal, we've got you covered. Order now and make your sunny day even brighter! ✨"
 ]
 
 SUNDAY = [
-    "Happy Sunday! ☀️ Hope you're having a relaxing day. Make it even better by letting us handle the cooking. What can we get for you?",
-    "It's Sunday – a day for rest and good food. Treat yourself to your favorite meal from our menu. You deserve it!",
-    "End your week on a high note with a delicious meal from Willis Kitchen. No cooking, no cleaning, just pure enjoyment.",
-    "Lazy Sunday? We've got the perfect solution. Order in and enjoy a hassle-free, tasty meal.",
-    "Make your Sunday special with a treat from us. Whether you're craving Indomie, custard, or something from the café, we're here for you."
+    "Happy Sunday! ☀️ A day for rest, relaxation, and really good food. You handle the relaxing, and let us handle the food! 😉 Treat yourself to your favorite Willis Kitchen meal today – you've earned it after a long week. No cooking, no cleanup, just pure Sunday bliss. 🙏",
+    "How's your Sunday going? Make it even better with a delicious meal delivered right to your door. 🚪 End your week on the perfect note with a customized plate of Indomie or a sweet custard treat. Your perfect lazy Sunday is just one order away! 🥳",
+    "It's Sunday Funday! 🎉 Don't spend it in the kitchen. Whether you're studying, relaxing, or just chilling, a hot meal from us is the perfect companion. Let us serve you the perfect end to your week. What will it be today? 🤔"
 ]
 
 CASUAL = [
-    "Hey there! Just a friendly check-in from Willis Kitchen. Hope you're having a great day! What's for lunch (or dinner)? 😉",
-    "Feeling hungry? You know who to call! Our kitchen is ready to whip up something amazing for you.",
-    "Just popping in to say hi! 👋 Remember, a delicious meal is just a few taps away.",
-    "What's on your mind? If it's food, you're in the right place! Check out our menu and treat yourself today.",
-    "Hope you're having a fantastic week! Don't forget to take a break and enjoy a good meal. We're always here to serve you."
+    "Hey there! 👋 Your friends at Willis Kitchen are just checking in. We were just thinking... what would make today even better? A delicious, hot meal, of course! 😉 Our kitchen is fired up and ready to cook up your favorite dish. Why not treat yourself? You deserve it! ✨",
+    "Feeling a little hungry? 😋 Just a friendly reminder that a delicious, custom-made meal is just a few taps away. Skip the instant noodles and let us make you something truly special. Our chefs are waiting for your order! 👨‍🍳",
+    "Just popping in to say we hope you're having an amazing week! ✨ Don't forget to take a break and refuel with something tasty. From our kitchen to your room, we're always ready to serve you a little plate of happiness. 😊 What can we get for you today?"
 ]
