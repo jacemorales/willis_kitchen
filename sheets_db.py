@@ -1,3 +1,4 @@
+import gspread
 import json
 from datetime import datetime
 import time
@@ -42,7 +43,7 @@ def add_order(user_id, username, food_type, items, total, status='pending', deli
     """Adds a new order to the Orders sheet."""
     order_id = int(time.time() * 1000) # milliseconds timestamp as order_id
     order_date = datetime.now().isoformat()
-
+    
     # Ensure complex data is stored as JSON strings
     items_str = json.dumps(items)
     delivery_info_str = json.dumps(delivery_info if delivery_info else {})
@@ -135,10 +136,10 @@ def get_worker_orders(worker_id, status):
     """Retrieves orders taken by a worker with a specific status."""
     all_orders = orders_sheet.get_all_records()
     return [
-        order for order in all_orders
+        order for order in all_orders 
         if order.get('taken_by') == worker_id and order.get('status') == status
     ]
-
+    
 def add_feedback(user_id, username, name, feedback_text):
     """Adds customer feedback."""
     feedback_id = int(time.time() * 1000)
