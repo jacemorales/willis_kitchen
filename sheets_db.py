@@ -14,7 +14,7 @@ client = get_sheets_client()
 if client is None:
     print("Failed to connect to Google Sheets. Please check your credentials.")
     sys.exit(1)
-    
+
 spreadsheet = client.open(SPREADSHEET_NAME)
 
 # Get individual worksheets
