@@ -75,10 +75,10 @@ async def send_or_edit_message(update: Update, text: str, reply_markup=None):
     """
     if update.callback_query:
         # If the update is from a button press, edit the message.
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
     else:
         # If the update is a regular message, send a new message.
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 # Enable logging
 logging.basicConfig(
@@ -1108,6 +1108,40 @@ async def get_chicken_3000_quantity(update: Update, context: CallbackContext) ->
 async def get_fried_fish_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "fried fish", INDOMIE_FRIED_FISH_QUANTITY)
 
+
+async def get_vegetables_quantity(update: Update, context: CallbackContext) -> int:
+    """Stores the quantity of vegetables."""
+    return await get_mixing_quantity(update, context, "vegetables", INDOMIE_VEGETABLES_QUANTITY)
+
+
+async def get_suya_amount(update: Update, context: CallbackContext) -> int:
+    """Stores the amount for suya and proceeds to toppings."""
+    try:
+        amount = int(update.message.text)
+        if amount <= 0:
+            await update.message.reply_text("Please enter a valid amount greater than 0.")
+            return INDOMIE_SUYA_AMOUNT
+
+        order = context.user_data["order"]
+        items = order.get("items", [])
+        items = [item for item in items if item.get("name") != "suya"]
+
+        items.append({
+            "name": "suya",
+            "type": "mixing",
+            "unit_price": amount,  # Price is the amount
+            "quantity": 1,
+            "total_price": amount,
+        })
+        order["items"] = items
+
+        return await ask_for_mixing_quantities(update, context)
+
+    except (ValueError, TypeError):
+        await update.message.reply_text("Invalid input. Please enter a number.")
+        return INDOMIE_SUYA_AMOUNT
+
+
 async def ask_for_delivery_time(update: Update, context: CallbackContext) -> int:
     """Asks for the delivery time."""
     await send_or_edit_message(update, "When would you like your order delivered?")
@@ -1378,13 +1412,13 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         
     # Add notes to the summary if they exist
     if order.get("notes"):
-        summary += f"\n**Notes:** {order['notes']}\n"
+        summary += f"\n<b>Notes:</b> {order['notes']}\n"
 
     summary += "\n----------------------\n"
     summary += f"Service Charge: ₦{service_charge}\n"
-    summary += f"**Total: ₦{total}**\n\n"
+    summary += f"<b>Total: ₦{total}</b>\n\n"
     summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app (Please use Google Chrome for the best experience)"
+    summary += "https://pay-naira.netlify.app <i>(Please use Google Chrome for the best experience)</i>"
 
     keyboard = [
         [
@@ -1486,7 +1520,7 @@ async def confirm_order(update: Update, context: CallbackContext) -> int:
     for item in order.get("items", []):
         summary += f"• {item['name']} x{item['quantity']}\n"
     if order.get("notes"):
-        summary += f"\n**Notes:** {order['notes']}\n"
+        summary += f"\n<b>Notes:</b> {order['notes']}\n"
     summary += f"Total: ₦{order['total']}\n\n"
     summary += f"Delivery to: {order['hall_and_room_number']}\n"
     summary += f"Delivery time: {order['delivery_time']}\n\n"
@@ -1504,7 +1538,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
     order = context.user_data["order"]
-    bill = "📋 **Billing Breakdown**:\n"
+    bill = "📋 <b>Billing Breakdown</b>:\n"
 
     items = order.get("items", [])
     subtotal = 0
@@ -1530,7 +1564,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
 
     bill += "----------------------\n"
     bill += f"Service Charge: ₦{service_charge}\n"
-    bill += f"💰 **Total = ₦{total}**"
+    bill += f"💰 <b>Total = ₦{total}</b>"
 
     # Ensure the order total is up-to-date
     context.user_data["order"]["total"] = total
@@ -1992,6 +2026,8 @@ async def main() -> None:
             INDOMIE_MIXINGS: [CallbackQueryHandler(indomie_mixings, pattern="^mixing_")],
             INDOMIE_TOPPINGS: [CallbackQueryHandler(indomie_toppings, pattern="^topping_")],
             INDOMIE_SARDINE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sardine_quantity)],
+            INDOMIE_VEGETABLES_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_vegetables_quantity)],
+            INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_suya_amount)],
             INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sausage_quantity)],
             INDOMIE_CHICKEN_1000_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1000_quantity)],
