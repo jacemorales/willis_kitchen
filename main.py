@@ -117,6 +117,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_PAYMENT_SCREENSHOT,
     INDOMIE_BEVERAGES,
     CUSTOMER_FEEDBACK,
+    INDOMIE_SOURCE,
     INDOMIE_FLAVOR,
     INDOMIE_SIZE,
     INDOMIE_QUANTITY,
@@ -136,7 +137,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_EXTRA_NOTES,
     ADMIN_CHECKIN_MENU,
     ADMIN_CUSTOM_MESSAGE_PROMPT,
-) = range(44)
+) = range(45)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -479,13 +480,13 @@ async def get_hall_and_room_number(update: Update, context: CallbackContext) -> 
 
 
 async def get_delivery_time(update: Update, context: CallbackContext) -> int:
-    """Stores the delivery time and proceeds to the order summary."""
+    """Stores the delivery time and asks for extra notes."""
     context.user_data["order"]["delivery_time"] = update.message.text
-    return await show_order_summary(update, context)
+    return await ask_for_extra_notes(update, context)
 
 
 async def get_extra_notes(update: Update, context: CallbackContext) -> int:
-    """Stores the extra notes and then asks for hall and room number."""
+    """Stores the extra notes and then proceeds to the order summary."""
     # Check if the message text is '/skip' command
     if update.message and update.message.text and update.message.text.lower() == '/skip':
         context.user_data["order"]["notes"] = None
@@ -496,7 +497,7 @@ async def get_extra_notes(update: Update, context: CallbackContext) -> int:
     else:
         context.user_data["order"]["notes"] = None
 
-    return await ask_for_hall_and_room_number(update, context)
+    return await show_order_summary(update, context)
 
 
 async def working_history(update: Update, context: CallbackContext) -> int:
@@ -569,7 +570,7 @@ async def take_order(update: Update, context: CallbackContext) -> None:
 
 
 async def indomie_start(update: Update, context: CallbackContext) -> int:
-    """Initializes the Indomie order with the new data structure."""
+    """Initializes the Indomie order and asks for the source."""
     query = update.callback_query
     await query.answer()
     context.user_data["order"] = {
@@ -578,16 +579,50 @@ async def indomie_start(update: Update, context: CallbackContext) -> int:
         "selected_mixings": [],
         "selected_toppings": [],
         "selected_beverages": [],
-        "flavor": "",
-        "size": "",
     }
     keyboard = [
-        [InlineKeyboardButton("Chicken Flavour", callback_data="flavor_chicken")],
-        [InlineKeyboardButton("Onion and Chicken", callback_data="flavor_onion_chicken")],
+        [
+            InlineKeyboardButton("I have my own Indomie", callback_data="indomie_source_own"),
+            InlineKeyboardButton("Use the kitchen's Indomie", callback_data="indomie_source_kitchen"),
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_or_edit_message(update, "Please choose a flavor:", reply_markup=reply_markup)
-    return INDOMIE_FLAVOR
+    await send_or_edit_message(
+        update,
+        "Will you be providing the Indomie, or should we use ours?",
+        reply_markup=reply_markup,
+    )
+    return INDOMIE_SOURCE
+
+
+async def indomie_source(update: Update, context: CallbackContext) -> int:
+    """Handles the source of the Indomie and proceeds accordingly."""
+    query = update.callback_query
+    await query.answer()
+    source = query.data.split("_")[-1]
+
+    if source == 'own':
+        context.user_data["order"]["source"] = "own"
+        # Add a base item with price 0
+        context.user_data["order"]["items"].append({
+            "name": "Indomie (Own)",
+            "type": "base",
+            "unit_price": 0,
+            "quantity": 1, # Default, will be updated
+            "total_price": 0
+        })
+        await send_or_edit_message(update, "How many packs of your Indomie would you like us to prepare?")
+        return INDOMIE_QUANTITY
+    else: # kitchen
+        context.user_data["order"]["source"] = "kitchen"
+        keyboard = [
+            [InlineKeyboardButton("Chicken Flavour", callback_data="flavor_chicken")],
+            [InlineKeyboardButton("Onion and Chicken", callback_data="flavor_onion_chicken")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await send_or_edit_message(update, "Please choose a flavor:", reply_markup=reply_markup)
+        return INDOMIE_FLAVOR
+
 
 async def indomie_flavor(update: Update, context: CallbackContext) -> int:
     """Stores the flavor and asks for the size."""
@@ -1180,7 +1215,7 @@ async def handle_beverage_selection(update: Update, context: CallbackContext) ->
 
 
 async def custard_start(update: Update, context: CallbackContext) -> int:
-    """Initializes the Custard order with the new data structure."""
+    """Initializes the Custard order and asks for the source first."""
     query = update.callback_query
     await query.answer()
     context.user_data["order"] = {
@@ -1188,12 +1223,35 @@ async def custard_start(update: Update, context: CallbackContext) -> int:
         "items": [],
         "selected_additions": [],
     }
+    keyboard = [
+        [
+            InlineKeyboardButton("I have my own Custard", callback_data="custard_source_own"),
+            InlineKeyboardButton("Use the kitchen's Custard", callback_data="custard_source_kitchen"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await send_or_edit_message(
+        update,
+        "Will you be providing the Custard, or should we use ours?",
+        reply_markup=reply_markup,
+    )
+    return CUSTARD_SOURCE
+
+
+async def custard_source(update: Update, context: CallbackContext) -> int:
+    """Stores the source of the Custard and then asks for the quantity."""
+    query = update.callback_query
+    await query.answer()
+    source = query.data.split("_")[-1]  # 'own' or 'kitchen'
+    context.user_data["order"]["source"] = source
+
+    # The price logic will be handled later, after quantity is known.
     await send_or_edit_message(update, "How many custard cups would you like to make?")
     return CUSTARD_QUANTITY
 
 
 async def custard_quantity(update: Update, context: CallbackContext) -> int:
-    """Stores the quantity of custard and asks for its source."""
+    """Stores the quantity of custard and proceeds to additions."""
     try:
         quantity = int(update.message.text)
         if quantity <= 0:
@@ -1205,46 +1263,22 @@ async def custard_quantity(update: Update, context: CallbackContext) -> int:
     order = context.user_data["order"]
     items = order.get("items", [])
 
+    # Determine the unit price based on the source
+    source = order.get("source")
+    unit_price = 0 if source == 'own' else PRICES.get("custard", 0)
+    item_name = "Custard (Own)" if source == 'own' else "Custard"
+
     # Remove any existing base custard item to avoid duplicates
     items = [item for item in items if item.get("type") != "base"]
 
-    unit_price = PRICES.get("custard", 0)
     items.append({
-        "name": "Custard",
+        "name": item_name,
         "type": "base",
         "unit_price": unit_price,
         "quantity": quantity,
         "total_price": unit_price * quantity,
     })
     order["items"] = items
-
-    keyboard = [
-        [
-            InlineKeyboardButton("I have my own Custard", callback_data="custard_source_own"),
-            InlineKeyboardButton("Use the kitchen's Custard", callback_data="custard_source_kitchen"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Will you be providing the Custard, or should we use ours?",
-        reply_markup=reply_markup,
-    )
-    return CUSTARD_SOURCE
-
-
-async def custard_source(update: Update, context: CallbackContext) -> int:
-    """Stores the source of the Custard and asks for additions."""
-    query = update.callback_query
-    await query.answer()
-    source = query.data.split("_")[-1]  # 'own' or 'kitchen'
-
-    if source == 'own':
-        # If user provides their own, set the price of the base item to 0.
-        order = context.user_data["order"]
-        for item in order["items"]:
-            if item["type"] == "base":
-                item["unit_price"] = 0
-                item["total_price"] = 0
 
     keyboard = custard_additions_keyboard()
     await send_or_edit_message(
@@ -1397,9 +1431,16 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     items = order.get("items", [])
     total = sum(item.get("total_price", 0) for item in items)
 
-    # Calculate service charge: ₦250 per Indomie item
-    indomie_items_count = sum(1 for item in items if item.get("type") == "base" and "indomie" in item.get("name", "").lower())
-    service_charge = indomie_items_count * 250
+    # Calculate service charge based on order type
+    service_charge = 0
+    if order.get("food") == "Cafe Order":
+        # ₦100 for every ₦500
+        service_charge = (total // 500) * 100
+    else: # Indomie and Custard
+        # ₦250 per base item (Indomie or Custard)
+        base_item_count = sum(1 for item in items if item.get("type") == "base")
+        service_charge = base_item_count * 250
+
     total += service_charge
     order["service_charge"] = service_charge
     order["total"] = total
@@ -1418,7 +1459,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     summary += f"Service Charge: ₦{service_charge}\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
     summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app <i>(Please use Google Chrome for the best experience)</i>"
+    summary += "https://pay-naira.netlify.app\n<i>open link in browser [Google Chrome]</i>"
 
     keyboard = [
         [
@@ -1592,11 +1633,11 @@ async def view_orders(update: Update, context: CallbackContext) -> int:
         await send_or_edit_message(update, "You have no orders yet. Start by placing one 🍽️")
         return MAIN_MENU
 
-    message = "📦 **Your Past Orders**:\n\n"
+    message = "📦 <b>Your Past Orders</b>:\n\n"
     total_spent = 0
     for i, order in enumerate(orders_data):
         order_date = order.get('order_date', 'N/A')
-        message += f"**Order #{i+1}** - Placed on {order_date}\n"
+        message += f"<b>Order #{i+1}</b> - Placed on {order_date}\n"
 
         try:
             items_str = order.get('items', '[]')
@@ -1739,6 +1780,7 @@ async def admin_password(update: Update, context: CallbackContext) -> int:
                 [InlineKeyboardButton("👷‍♂️ Workers", callback_data="admin_workers")],
                 [InlineKeyboardButton("💳 Payments", callback_data="admin_payments")],
                 [InlineKeyboardButton("📝 Customer Feedbacks", callback_data="admin_feedback")],
+                [InlineKeyboardButton("📣 Customer Check-ins", callback_data="admin_checkin")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text("Welcome Admin 👑 What would you like to manage today?", reply_markup=reply_markup)
@@ -2020,6 +2062,7 @@ async def main() -> None:
                 CallbackQueryHandler(start, pattern="^main_menu$"),
                 CallbackQueryHandler(kitchen_menu, pattern="^back_to_kitchen_menu$"),
             ],
+            INDOMIE_SOURCE: [CallbackQueryHandler(indomie_source, pattern="^indomie_source_")],
             INDOMIE_FLAVOR: [CallbackQueryHandler(indomie_flavor, pattern="^flavor_")],
             INDOMIE_SIZE: [CallbackQueryHandler(indomie_size, pattern="^size_")],
             INDOMIE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, indomie_quantity)],
