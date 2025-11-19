@@ -2,6 +2,7 @@ import gspread
 import os
 import json
 from google.oauth2.service_account import Credentials
+from google.auth.exceptions import RefreshError
 
 def get_sheets_client():
     """
@@ -13,7 +14,8 @@ def get_sheets_client():
     try:
         creds_json_str = os.getenv("GOOGLE_CREDENTIALS")
         if not creds_json_str:
-            raise ValueError("GOOGLE_CREDENTIALS environment variable not set.")
+            print("CRITICAL: GOOGLE_CREDENTIALS environment variable not set.")
+            return None
 
         creds_dict = json.loads(creds_json_str)
 
@@ -27,7 +29,11 @@ def get_sheets_client():
 
         return client
     except json.JSONDecodeError:
-        raise ValueError("Failed to parse GOOGLE_CREDENTIALS. Make sure it's a valid JSON string.")
+        print("CRITICAL: Failed to parse GOOGLE_CREDENTIALS. Make sure it's a valid JSON string.")
+        return None
+    except RefreshError as e:
+        print(f"CRITICAL: The credentials in GOOGLE_CREDENTIALS are invalid. Please check the value. Details: {e}")
+        return None
     except Exception as e:
-        print(f"An error occurred while setting up Google Sheets client: {e}")
+        print(f"An unexpected error occurred while setting up Google Sheets client: {e}")
         return None
