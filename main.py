@@ -136,7 +136,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_EXTRA_NOTES,
     ADMIN_CHECKIN_MENU,
     ADMIN_CUSTOM_MESSAGE_PROMPT,
-) = range(43)
+) = range(44)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
