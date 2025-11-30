@@ -87,21 +87,25 @@ def get_order_by_id(order_id):
     except AttributeError:
         return None
 
-def update_order_status(order_id, status, worker_id=None):
-    """Updates the status and taken_by field of an order."""
+def update_order_status(order_id, status, worker_id=None, delivery_issue=None):
+    """Updates the status, taken_by, and delivery_issue fields of an order."""
     try:
         cell = orders_sheet.find(str(order_id), in_column=1)
-        # Column 8 is 'status', Column 11 is 'taken_by'
+        # Column 8 is 'status'
         orders_sheet.update_cell(cell.row, 8, status)
         if worker_id:
+            # Column 11 is 'taken_by'
             orders_sheet.update_cell(cell.row, 11, worker_id)
+        if delivery_issue:
+            # Column 12 is 'delivery_issue'
+            orders_sheet.update_cell(cell.row, 12, delivery_issue)
     except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 
-def add_worker_application(user_id, username, name, reg_no, matric_no, phone):
+def add_worker_application(user_id, username, name, reg_no, matric_no, phone, gender):
     """Adds a new worker application."""
     app_id = int(time.time() * 1000)
-    new_row = [app_id, user_id, username, name, reg_no, matric_no, phone, 'pending']
+    new_row = [app_id, user_id, username, name, reg_no, matric_no, phone, 'pending', gender]
     worker_applications_sheet.append_row(new_row)
 
 def get_worker_applications(status=None):
@@ -120,9 +124,9 @@ def update_worker_application_status(application_id, status):
     except AttributeError:
         print(f"Error: Application ID {application_id} not found.")
 
-def add_worker(user_id, name, reg_no, matric_no, phone):
+def add_worker(user_id, name, reg_no, matric_no, phone, gender):
     """Adds a new approved worker."""
-    new_row = [user_id, name, reg_no, matric_no, phone, 'active']
+    new_row = [user_id, name, reg_no, matric_no, phone, 'active', gender]
     workers_sheet.append_row(new_row)
 
 def get_all_workers(active_only=True):
@@ -159,7 +163,8 @@ def get_all_feedback():
 def add_payment(order_id, screenshot_file_id, username, total):
     """Adds a payment record."""
     payment_id = int(time.time() * 1000)
-    new_row = [payment_id, order_id, screenshot_file_id, username, total]
+    timestamp = datetime.now().isoformat()
+    new_row = [payment_id, order_id, screenshot_file_id, username, total, timestamp]
     payments_sheet.append_row(new_row)
 
 def get_all_payments():

@@ -26,8 +26,8 @@ This sheet stores information about every user who interacts with the bot.
 ### `Orders` Sheet
 This sheet contains a record of every order placed.
 
-| order_id | user_id | username | food_type | items | total | order_date | status | delivery_info | notes | taken_by |
-|---|---|---|---|---|---|---|---|---|---|---|
+| order_id | user_id | username | food_type | items | total | order_date | status | delivery_info | notes | taken_by | delivery_issue |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **order_id**: A unique ID for the order (e.g., a timestamp or an incrementing number).
 - **user_id**: The Telegram user ID of the person who placed the order.
@@ -44,8 +44,8 @@ This sheet contains a record of every order placed.
 ### `Workers` Sheet
 This sheet manages the list of approved workers.
 
-| user_id | name | reg_no | matric_no | phone | status |
-|---|---|---|---|---|---|
+| user_id | name | reg_no | matric_no | phone | status | gender |
+|---|---|---|---|---|---|---|
 
 - **user_id**: The worker's Telegram user ID.
 - **name**: The worker's full name.
@@ -53,12 +53,13 @@ This sheet manages the list of approved workers.
 - **matric_no**: Matriculation number.
 - **phone**: Phone number.
 - **status**: The worker's status (e.g., `active`, `inactive`).
+- **gender**: The worker's gender (`male` or `female`).
 
 ### `WorkerApplications` Sheet
 This sheet stores applications from users who want to become workers.
 
-| application_id | user_id | username | name | reg_no | matric_no | phone | status |
-|---|---|---|---|---|---|---|---|
+| application_id | user_id | username | name | reg_no | matric_no | phone | status | gender |
+|---|---|---|---|---|---|---|---|---|
 
 - **application_id**: A unique ID for the application.
 - **user_id**: The applicant's Telegram user ID.
@@ -85,13 +86,14 @@ This sheet collects feedback from customers.
 ### `Payments` Sheet
 This sheet logs payment screenshot information.
 
-| payment_id | order_id | screenshot_file_id | username | total |
-|---|---|---|---|---|
+| payment_id | order_id | screenshot_file_id | username | total | timestamp |
+|---|---|---|---|---|---|
 - **payment_id**: A unique ID for the payment.
 - **order_id**: The ID of the order this payment is for.
 - **screenshot_file_id**: The Telegram file ID of the uploaded screenshot.
 - **username**: The user who made the payment.
 - **total**: The total amount paid.
+- **timestamp**: The time the payment was recorded.
 
 ## 3. Share the Spreadsheet with the Service Account
 
