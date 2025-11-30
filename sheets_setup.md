@@ -26,8 +26,8 @@ This sheet stores information about every user who interacts with the bot.
 ### `Orders` Sheet
 This sheet contains a record of every order placed.
 
-| order_id | user_id | username | food_type | items | total | order_date | status | delivery_info | notes | taken_by |
-|---|---|---|---|---|---|---|---|---|---|---|
+| order_id | user_id | username | food_type | items | total | order_date | status | delivery_info | notes | taken_by | delivery_issue |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **order_id**: A unique ID for the order (e.g., a timestamp or an incrementing number).
 - **user_id**: The Telegram user ID of the person who placed the order.
