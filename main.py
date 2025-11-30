@@ -87,13 +87,13 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
     """Generates a detailed order summary for workers and admins."""
     summary = f"<b>Customer Name:</b> {order.get('first_name', 'N/A')}\n"
     summary += f"<b>Customer Username:</b> @{order.get('username', 'N/A')}\n"
-
+    
     try:
         delivery_info = json.loads(order.get('delivery_info', '{}'))
     except json.JSONDecodeError:
         delivery_info = {}
     summary += f"<b>Room Number:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n\n"
-
+    
     summary += "<b>Items Ordered:</b>\n"
     try:
         items = json.loads(order.get('items', '[]'))
@@ -101,48 +101,48 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         items = []
     for item in items:
         summary += f"- {item.get('name', 'N/A')} x{item.get('quantity', 0)}\n"
-
+        
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
-
+        
     service_charge = order.get('service_charge', 0)
     worker_payout = get_worker_payout(service_charge)
-
+    
     if for_admin:
         summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
-
+    
     summary += f"<b>Worker Payout:</b> ₦{worker_payout}\n"
-
+    
     return summary
 
 
 async def get_order_summary_for_customer(order: dict) -> str:
     """Generates a detailed order summary for the customer, excluding worker payout."""
     summary = f"<b>Order for:</b> {order.get('first_name', 'N/A')} (@{order.get('username', 'N/A')})\n"
-
+    
     delivery_info_str = order.get('delivery_info', '{}')
     try:
         delivery_info = json.loads(delivery_info_str)
     except json.JSONDecodeError:
         delivery_info = {}
     summary += f"<b>Delivering to:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n\n"
-
+    
     summary += "<b>Items Ordered:</b>\n"
     items_str = order.get('items', '[]')
     try:
         items = json.loads(items_str)
     except json.JSONDecodeError:
         items = []
-
+        
     for item in items:
         summary += f"- {item.get('name', 'N/A')} x{item.get('quantity', 0)}\n"
-
+        
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
-
+        
     total = order.get('total', 0)
     summary += f"\n<b>Total: ₦{total}</b>"
-
+    
     return summary
 
 
@@ -674,7 +674,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
     # User notifications
     user_id = order.get('user_id')
     await context.bot.send_message(chat_id=user_id, text="Your order has been accepted 🎉")
-
+    
     user_keyboard = [
         [InlineKeyboardButton("✅ Order Delivered", callback_data=f"user_delivered_{order_id}")],
         [InlineKeyboardButton("❌ Not Delivered", callback_data=f"user_not_delivered_{order_id}")],
@@ -718,7 +718,7 @@ async def user_not_delivered_order(update: Update, context: CallbackContext) -> 
 
     order_id = int(query.data.split("_")[-1])
     context.user_data["issue_order_id"] = order_id
-
+    
     await send_or_edit_message(update, "Please tell us what went wrong — was your delivery mixed up, incomplete, cold, or not delivered at all? 🤔")
     return GET_DELIVERY_ISSUE
 
@@ -945,7 +945,7 @@ async def ask_for_mixing_quantities(update: Update, context: CallbackContext) ->
         elif next_mixing_to_ask == "sardine":
             message_text = "How many servings of sardine would you like?"
             next_state = INDOMIE_SARDINE_QUANTITY
-
+        
         if not message_text:
             logger.error(f"Could not determine message text for mixing: {next_mixing_to_ask}")
             message_text = f"Please provide quantity for {next_mixing_to_ask.replace('_', ' ')}:"
@@ -1063,7 +1063,7 @@ async def ask_for_topping_quantities(update: Update, context: CallbackContext) -
         elif next_topping_to_ask == "fried fish":
             message_text = "How many pieces of fried fish would you like?"
             next_state = INDOMIE_FRIED_FISH_QUANTITY
-
+        
         if not message_text:
             logger.error(f"Could not determine message text for topping: {next_topping_to_ask}")
             message_text = f"Please provide quantity for {next_topping_to_ask.replace('_', ' ')}:"
@@ -2020,7 +2020,7 @@ async def view_all_orders_admin(update: Update, context: CallbackContext) -> int
         username = order.get('username', 'N/A')
         total = order.get('total', 0)
         status = order.get('status', 'N/A')
-
+        
         message += f"<b>ID:</b> {order_id}, <b>User:</b> @{username}, <b>Total:</b> ₦{total}, <b>Status:</b> {status}\n"
         keyboard.append([InlineKeyboardButton(f"View Details for Order #{order_id}", callback_data=f"admin_view_order_{order_id}")])
 
