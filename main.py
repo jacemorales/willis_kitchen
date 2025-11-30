@@ -94,7 +94,12 @@ def format_date(iso_date_str):
             suffix = "th"
         else:
             suffix = ["st", "nd", "rd"][day % 10 - 1]
-        return dt.strftime(f"%a, {day}{suffix} %b, %Y")
+
+        # Format the date and time separately
+        date_part = dt.strftime(f"%a, {day}{suffix} %b, %Y")
+        time_part = dt.strftime("%I:%M%p").lower()
+
+        return f"{date_part} at {time_part}"
     except (ValueError, TypeError):
         return iso_date_str
 
@@ -134,14 +139,7 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
 
 async def get_order_summary_for_customer(order: dict) -> str:
     """Generates a detailed order summary for the customer, excluding worker payout."""
-    summary = f"<b>Order for:</b> {order.get('first_name', 'N/A')} (@{order.get('username', 'N/A')})\n"
-    
-    delivery_info_str = order.get('delivery_info', '{}')
-    try:
-        delivery_info = json.loads(delivery_info_str)
-    except json.JSONDecodeError:
-        delivery_info = {}
-    summary += f"<b>Delivering to:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n\n"
+    summary = "<b>Full Order Summary:</b>\n\n"
     
     summary += "<b>Items Ordered:</b>\n"
     items_str = order.get('items', '[]')
@@ -149,15 +147,21 @@ async def get_order_summary_for_customer(order: dict) -> str:
         items = json.loads(items_str)
     except json.JSONDecodeError:
         items = []
-        
     for item in items:
         summary += f"- {item.get('name', 'N/A')} x{item.get('quantity', 0)}\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
         
+    delivery_info_str = order.get('delivery_info', '{}')
+    try:
+        delivery_info = json.loads(delivery_info_str)
+    except json.JSONDecodeError:
+        delivery_info = {}
+    summary += f"\n<b>Room:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n"
+
     total = order.get('total', 0)
-    summary += f"\n<b>Total: ₦{total}</b>"
+    summary += f"<b>Total: ₦{total}</b>"
     
     return summary
 
@@ -1653,12 +1657,18 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     summary += "Here is your order:\n\n"
 
     items = order.get("items", [])
-    total = sum(item.get("total_price", 0) for item in items)
+    subtotal = sum(item.get("total_price", 0) for item in items)
 
-    # Calculate service charge: ₦250 per Indomie item
-    indomie_items_count = sum(1 for item in items if item.get("type") == "base" and "indomie" in item.get("name", "").lower())
-    service_charge = indomie_items_count * 250
-    total += service_charge
+    service_charge = 0
+    if order.get("food") in ["Indomie", "Custard"]:
+        # Kitchen Order: ₦250 per base item (Indomie or Custard)
+        base_items_count = sum(1 for item in items if item.get("type") == "base")
+        service_charge = base_items_count * 250
+    elif order.get("food") == "Cafe Order":
+        # Cafe Order: ₦100 for every ₦500 of the subtotal
+        service_charge = (subtotal // 500) * 100
+
+    total = subtotal + service_charge
     order["service_charge"] = service_charge
     order["total"] = total
 
@@ -1676,7 +1686,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     summary += "----------------------\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
     summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app\nopen link in browser <i>[Google Chrome]</i>"
+    summary += "https://pay-naira.netlify.app"
 
     keyboard = [
         [
@@ -1802,7 +1812,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     bill = "📋 <b>Billing Breakdown</b>:\n"
 
     items = order.get("items", [])
-    subtotal = 0
+    subtotal = sum(item.get("total_price", 0) for item in items)
 
     # Iterate through each item and add its details to the bill
     for item in items:
@@ -1817,10 +1827,14 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
             bill += f"• {name} (Amount) = ₦{item_total}\n"
         else:
             bill += f"• {name} ({quantity} × ₦{unit_price}) = ₦{item_total}\n"
-        subtotal += item_total
 
-    indomie_items_count = sum(1 for item in items if item.get("type") == "base" and "indomie" in item.get("name", "").lower())
-    service_charge = indomie_items_count * 250
+    service_charge = 0
+    if order.get("food") in ["Indomie", "Custard"]:
+        base_items_count = sum(1 for item in items if item.get("type") == "base")
+        service_charge = base_items_count * 250
+    elif order.get("food") == "Cafe Order":
+        service_charge = (subtotal // 500) * 100
+
     total = subtotal + service_charge
 
     bill += f"Service Charge: ₦{service_charge}\n"
@@ -1828,7 +1842,8 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     bill += f"💰 <b>Total = ₦{total}</b>"
 
     # Ensure the order total is up-to-date
-    context.user_data["order"]["total"] = total
+    order["service_charge"] = service_charge
+    order["total"] = total
 
     keyboard = [
         [
