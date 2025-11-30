@@ -102,10 +102,10 @@ def update_order_status(order_id, status, worker_id=None, delivery_issue=None):
     except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 
-def add_worker_application(user_id, username, name, reg_no, matric_no, phone):
+def add_worker_application(user_id, username, name, reg_no, matric_no, phone, gender):
     """Adds a new worker application."""
     app_id = int(time.time() * 1000)
-    new_row = [app_id, user_id, username, name, reg_no, matric_no, phone, 'pending']
+    new_row = [app_id, user_id, username, name, reg_no, matric_no, phone, 'pending', gender]
     worker_applications_sheet.append_row(new_row)
 
 def get_worker_applications(status=None):
@@ -124,9 +124,9 @@ def update_worker_application_status(application_id, status):
     except AttributeError:
         print(f"Error: Application ID {application_id} not found.")
 
-def add_worker(user_id, name, reg_no, matric_no, phone):
+def add_worker(user_id, name, reg_no, matric_no, phone, gender):
     """Adds a new approved worker."""
-    new_row = [user_id, name, reg_no, matric_no, phone, 'active']
+    new_row = [user_id, name, reg_no, matric_no, phone, 'active', gender]
     workers_sheet.append_row(new_row)
 
 def get_all_workers(active_only=True):
