@@ -44,8 +44,8 @@ This sheet contains a record of every order placed.
 ### `Workers` Sheet
 This sheet manages the list of approved workers.
 
-| user_id | name | reg_no | matric_no | phone | status | gender |
-|---|---|---|---|---|---|---|
+| user_id | name | reg_no | matric_no | phone | status | gender | bank_name | account_number | account_name | payout | total_payout |
+|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **user_id**: The worker's Telegram user ID.
 - **name**: The worker's full name.
@@ -54,6 +54,11 @@ This sheet manages the list of approved workers.
 - **phone**: Phone number.
 - **status**: The worker's status (e.g., `active`, `inactive`).
 - **gender**: The worker's gender (`male` or `female`).
+- **bank_name**: The worker's bank name.
+- **account_number**: The worker's bank account number.
+- **account_name**: The name on the worker's bank account.
+- **payout**: A JSON string representing a list of payout records.
+- **total_payout**: The sum of all payouts for the worker.
 
 ### `WorkerApplications` Sheet
 This sheet stores applications from users who want to become workers.
