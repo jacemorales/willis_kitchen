@@ -43,7 +43,7 @@ This sheet contains a record of every order placed.
 - **taken_by**: The user ID of the worker who took the order.
 
 ### `Workers` Sheet
-This sheet manages the list of approved workers.
+This sheet manages all workers and their application status.
 
 | user_id | name | reg_no | matric_no | phone | status | gender | bank_name | account_number | account_name | payout | total_payout |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -53,28 +53,13 @@ This sheet manages the list of approved workers.
 - **reg_no**: Registration number.
 - **matric_no**: Matriculation number.
 - **phone**: Phone number.
-- **status**: The worker's status (e.g., `active`, `inactive`).
+- **status**: The worker's status (`pending`, `approved`, `rejected`).
 - **gender**: The worker's gender (`male` or `female`).
 - **bank_name**: The worker's bank name.
 - **account_number**: The worker's bank account number.
 - **account_name**: The name on the worker's bank account.
 - **payout**: A JSON string representing a list of payout records.
 - **total_payout**: The sum of all payouts for the worker.
-
-### `WorkerApplications` Sheet
-This sheet stores applications from users who want to become workers.
-
-| application_id | user_id | username | name | reg_no | matric_no | phone | status | gender |
-|---|---|---|---|---|---|---|---|---|
-
-- **application_id**: A unique ID for the application.
-- **user_id**: The applicant's Telegram user ID.
-- **username**: The applicant's Telegram @username.
-- **name**: The applicant's full name.
-- **reg_no**: Registration number.
-- **matric_no**: Matriculation number.
-- **phone**: Phone number.
-- **status**: The application status (`pending`, `approved`, `rejected`).
 
 ### `Feedback` Sheet
 This sheet collects feedback from customers.

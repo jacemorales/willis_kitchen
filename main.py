@@ -25,9 +25,8 @@ from sheets_db import (
     add_order, get_user_orders, get_all_orders,
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
-    add_worker_application, get_worker_applications, update_worker_application_status,
     add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
-    add_or_update_user
+    add_or_update_user, get_workers_by_status, update_worker_status
 )
 from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL
@@ -456,7 +455,7 @@ async def notify_admin_of_new_kitchen_order(context: CallbackContext, order_id: 
 async def notify_admin_of_accepted_order(context: CallbackContext, order_id: int, worker_id: int):
     """Notifies the admin when any order has been accepted."""
     order = get_order_by_id(order_id)
-    worker = next((w for w in get_all_workers(active_only=False) if w.get('user_id') == worker_id), None)
+    worker = next((w for w in get_all_workers(approved_only=False) if w.get('user_id') == worker_id), None)
     
     if not order or not worker:
         return
@@ -553,9 +552,8 @@ async def worker_account_name(update: Update, context: CallbackContext) -> int:
     application_data = context.user_data["worker_application"]
     user = update.effective_user
 
-    add_worker_application(
+    add_worker(
         user_id=user.id,
-        username=user.username,
         name=application_data.get('name'),
         reg_no=application_data.get('reg_no'),
         matric_no=application_data.get('matric_no'),
@@ -563,11 +561,12 @@ async def worker_account_name(update: Update, context: CallbackContext) -> int:
         gender=application_data.get('gender'),
         bank_name=application_data.get('bank_name'),
         account_number=application_data.get('account_number'),
-        account_name=application_data.get('account_name')
+        account_name=application_data.get('account_name'),
+        status='pending'
     )
 
     admin_message = (
-        f"🧑‍🍳 New Waiter Application:\n"
+        f"🧑‍🍳 New Worker Application:\n"
         f"Name: {application_data.get('name')}\n"
         f"User: @{user.username}\n"
         f"Phone: {application_data.get('phone')}\n"
@@ -579,7 +578,7 @@ async def worker_account_name(update: Update, context: CallbackContext) -> int:
 
     await update.message.reply_text(
         "✅ Thank you for applying to become a Willis Kitchen worker.\n"
-        "Your request is being processed."
+        "Your application is pending review."
     )
     return ConversationHandler.END
 
@@ -589,43 +588,23 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
     query = update.callback_query
     await query.answer()
 
-    application_id = int(query.data.split("_")[-1])
-    action = query.data.split("_")[0]
-
-    apps = get_worker_applications()
-    application_data = next((app for app in apps if app.get('application_id') == application_id), None)
-
-    if not application_data:
-        await send_or_edit_message(update, "Application not found.")
-        return
-
-    user_id = application_data.get('user_id')
+    user_id = int(query.data.split("_")[-1])
+    action = query.data.split("_")[0] # 'approve' or 'reject'
 
     if action == "approve":
-        update_worker_application_status(application_id, 'approved')
-        add_worker(
-            user_id=user_id,
-            name=application_data.get('name'),
-            reg_no=application_data.get('reg_no'),
-            matric_no=application_data.get('matric_no'),
-            phone=application_data.get('phone'),
-            gender=application_data.get('gender'),
-            bank_name=application_data.get('bank_name'),
-            account_number=application_data.get('account_number'),
-            account_name=application_data.get('account_name')
-        )
+        update_worker_status(user_id, 'approved')
         await context.bot.send_message(
             chat_id=user_id,
             text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker."
         )
-        await send_or_edit_message(update, f"Application {application_id} approved.")
+        await send_or_edit_message(update, f"Worker {user_id} approved.")
     else:  # Reject
-        update_worker_application_status(application_id, 'rejected')
+        update_worker_status(user_id, 'rejected')
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ Your application was not approved at this time."
+            text="❌ Your worker application was not approved at this time."
         )
-        await send_or_edit_message(update, f"Application {application_id} rejected.")
+        await send_or_edit_message(update, f"Worker {user_id} rejected.")
 
 
 async def share_command(update: Update, context: CallbackContext) -> None:
@@ -2157,9 +2136,8 @@ async def admin_orders_menu(update: Update, context: CallbackContext) -> int:
 
 def admin_workers_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("View Workers", callback_data="view_workers_admin")],
-        [InlineKeyboardButton("View Active Applications", callback_data="view_active_apps")],
-        [InlineKeyboardButton("View All Applications", callback_data="view_all_apps")],
+        [InlineKeyboardButton("View All Workers", callback_data="view_workers_admin")],
+        [InlineKeyboardButton("View Pending Applications", callback_data="view_pending_apps")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
     ])
 
@@ -2339,41 +2317,42 @@ async def admin_view_order_details(update: Update, context: CallbackContext) -> 
     return ADMIN_MENU
 
 async def view_workers_admin(update: Update, context: CallbackContext) -> int:
-    """Displays all approved workers."""
+    """Displays all workers, regardless of status."""
     query = update.callback_query
     await query.answer()
-    workers_data = get_all_workers(active_only=False)
+    workers_data = get_all_workers(approved_only=False)
     if not workers_data:
         await send_or_edit_message(update, "No registered workers yet.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
-    message = "👷‍♂️ Approved Workers:\n"
+    message = "👷‍♂️ All Workers:\n"
     for worker in workers_data:
-        message += f"Name: {worker.get('name')}, User ID: {worker.get('user_id')}\n"
+        message += f"Name: {worker.get('name')}, User: @{worker.get('username', 'N/A')}, Status: {worker.get('status', 'N/A')}\n"
     await send_or_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
-async def view_active_applications_admin(update: Update, context: CallbackContext) -> int:
-    """Displays pending worker applications."""
+async def view_pending_applications_admin(update: Update, context: CallbackContext) -> int:
+    """Displays pending worker applications from the Workers sheet."""
     query = update.callback_query
     await query.answer()
-    applications_data = get_worker_applications(status='pending')
+    applications_data = get_workers_by_status('pending')
     if not applications_data:
-        await send_or_edit_message(update, "No active applications.", reply_markup=admin_workers_menu_keyboard())
+        await send_or_edit_message(update, "No pending applications.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
     for app in applications_data:
-        app_id = app.get('application_id')
-        message = f"App ID: {app_id}, Name: {app.get('name')}, User: @{app.get('username')}, Phone: {app.get('phone')}"
+        user_id = app.get('user_id')
+        message = f"Pending App for: {app.get('name')} (@{app.get('username')})\nPhone: {app.get('phone')}"
         keyboard = [
             [
-                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{app_id}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{app_id}"),
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(message, reply_markup=reply_markup)
     return ADMIN_MENU
+
 
 async def handle_admin_order_action(update: Update, context: CallbackContext) -> None:
     """Handles admin decisions on active orders."""
@@ -2422,21 +2401,6 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
     )
     await update.message.reply_text("Thank you for your feedback! It has been recorded.")
     return ConversationHandler.END
-
-async def view_all_applications_admin(update: Update, context: CallbackContext) -> int:
-    """Displays all worker applications."""
-    query = update.callback_query
-    await query.answer()
-    applications_data = get_worker_applications()
-    if not applications_data:
-        await send_or_edit_message(update, "No applications found.", reply_markup=admin_workers_menu_keyboard())
-        return ADMIN_MENU
-
-    message = "📋 All Applications:\n"
-    for app in applications_data:
-        message += f"ID: {app.get('application_id')}, Name: {app.get('name')}, User: @{app.get('username')}, Status: {app.get('status')}\n"
-    await send_or_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
-    return ADMIN_MENU
 
 
 async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
@@ -2573,8 +2537,7 @@ async def main() -> None:
                 CallbackQueryHandler(view_taken_orders_admin, pattern="^view_taken_orders_admin$"),
                 CallbackQueryHandler(view_all_orders_admin, pattern=r"^view_all_orders_admin(_page_\d+)?$"),
                 CallbackQueryHandler(view_workers_admin, pattern="^view_workers_admin$"),
-                CallbackQueryHandler(view_active_applications_admin, pattern="^view_active_apps$"),
-                CallbackQueryHandler(view_all_applications_admin, pattern="^view_all_apps$"),
+                CallbackQueryHandler(view_pending_applications_admin, pattern="^view_pending_apps$"),
                 CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
             ],
             ADMIN_CHECKIN_MENU: [
