@@ -124,10 +124,37 @@ def update_worker_application_status(application_id, status):
     except AttributeError:
         print(f"Error: Application ID {application_id} not found.")
 
-def add_worker(user_id, name, reg_no, matric_no, phone, gender):
-    """Adds a new approved worker."""
-    new_row = [user_id, name, reg_no, matric_no, phone, 'active', gender]
+def add_worker(user_id, name, reg_no, matric_no, phone, gender, bank_name=None, account_number=None, account_name=None):
+    """Adds a new approved worker with empty payout columns."""
+    new_row = [
+        user_id, name, reg_no, matric_no, phone, 'active', gender,
+        bank_name, account_number, account_name,
+        json.dumps([]),  # Payout (empty array)
+        0  # Total Payout
+    ]
     workers_sheet.append_row(new_row)
+
+def update_worker_payout(worker_id, order_id, payout_amount):
+    """Adds a payout record to a worker's profile and updates the total."""
+    try:
+        cell = workers_sheet.find(str(worker_id), in_column=1)
+
+        # Get current payout list (column 11)
+        payouts_str = workers_sheet.cell(cell.row, 11).value
+        payouts = json.loads(payouts_str) if payouts_str else []
+
+        # Add new payout record
+        payouts.append({"order_id": order_id, "payout": payout_amount})
+        workers_sheet.update_cell(cell.row, 11, json.dumps(payouts))
+
+        # Update total payout (column 12)
+        total_payout = sum(p['payout'] for p in payouts)
+        workers_sheet.update_cell(cell.row, 12, total_payout)
+
+    except (AttributeError, gspread.exceptions.CellNotFound):
+        print(f"Error: Worker ID {worker_id} not found.")
+    except json.JSONDecodeError:
+        print(f"Error: Could not parse payout data for worker {worker_id}.")
 
 def get_all_workers(active_only=True):
     """Retrieves all workers."""
