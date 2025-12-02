@@ -25,9 +25,8 @@ from sheets_db import (
     add_order, get_user_orders, get_all_orders,
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
-    add_worker_application, get_worker_applications, update_worker_application_status,
     add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
-    add_or_update_user
+    add_or_update_user, get_workers_by_status, update_worker_status
 )
 from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL
@@ -94,7 +93,7 @@ def format_date(iso_date_str):
             suffix = "th"
         else:
             suffix = ["st", "nd", "rd"][day % 10 - 1]
-
+        
         # Applying the new format
         formatted_date = dt.strftime(f"%a, {day}{suffix} %b, %Y at %I:%M%p")
         # Ensure 'am/pm' is lowercase as is standard
@@ -124,7 +123,7 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
     except json.JSONDecodeError:
         items = []
     for item in items:
-        summary += f"- {item.get('name', 'N/A')} (x{item.get('quantity', 0)}) => ₦{item.get('total_price', 0)}\n"
+        summary += f"- {item.get('name', 'N/A')} (x{item.get('quantity', 0)}) = ₦{item.get('total_price', 0)}\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
@@ -153,7 +152,7 @@ async def get_order_summary_for_customer(order: dict) -> str:
     except json.JSONDecodeError:
         items = []
     for item in items:
-        summary += f"- {item.get('name', 'N/A')} (x{item.get('quantity', 0)}) => ₦{item.get('total_price', 0)}\n"
+        summary += f"- {item.get('name', 'N/A')} (x{item.get('quantity', 0)}) = ₦{item.get('total_price', 0)}\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
@@ -164,7 +163,7 @@ async def get_order_summary_for_customer(order: dict) -> str:
     except json.JSONDecodeError:
         delivery_info = {}
     summary += f"\n<b>Room:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n"
-
+        
     total = order.get('total', 0)
     summary += f"<b>Total: ₦{total}</b>"
     
@@ -360,6 +359,7 @@ async def confirm_cafe_order(update: Update, context: CallbackContext) -> int:
         food_type=order["food"],
         items=order.get("items", []),
         total=order["total"],
+        service_charge=order.get("service_charge", 0),
         status='pending',
         delivery_info=delivery_info,
         notes=order.get("notes")
@@ -435,7 +435,7 @@ async def notify_workers(context: CallbackContext, order_id: int):
 async def notify_admin_of_new_kitchen_order(context: CallbackContext, order_id: int):
     """Notifies the admin of a new Kitchen Order."""
     order = get_order_by_id(order_id)
-
+    
     # Explicitly check if the order is a Kitchen Order before proceeding.
     if not order or order.get('food_type') not in ["Indomie", "Custard"]:
         return # Do not notify for non-kitchen orders
@@ -455,7 +455,7 @@ async def notify_admin_of_new_kitchen_order(context: CallbackContext, order_id: 
 async def notify_admin_of_accepted_order(context: CallbackContext, order_id: int, worker_id: int):
     """Notifies the admin when any order has been accepted."""
     order = get_order_by_id(order_id)
-    worker = next((w for w in get_all_workers(active_only=False) if w.get('user_id') == worker_id), None)
+    worker = next((w for w in get_all_workers(approved_only=False) if w.get('user_id') == worker_id), None)
     
     if not order or not worker:
         return
@@ -529,7 +529,7 @@ async def worker_gender(update: Update, context: CallbackContext) -> int:
     await query.answer()
     gender = query.data.split("_")[-1]
     context.user_data["worker_application"]["gender"] = gender
-
+    
     await send_or_edit_message(update, "Please enter your Bank Name:")
     return WORKER_BANK_NAME
 
@@ -548,13 +548,12 @@ async def worker_account_number(update: Update, context: CallbackContext) -> int
 async def worker_account_name(update: Update, context: CallbackContext) -> int:
     """Stores account name, saves the application, and notifies the admin."""
     context.user_data["worker_application"]["account_name"] = update.message.text
-
+    
     application_data = context.user_data["worker_application"]
     user = update.effective_user
 
-    add_worker_application(
+    add_worker(
         user_id=user.id,
-        username=user.username,
         name=application_data.get('name'),
         reg_no=application_data.get('reg_no'),
         matric_no=application_data.get('matric_no'),
@@ -562,11 +561,12 @@ async def worker_account_name(update: Update, context: CallbackContext) -> int:
         gender=application_data.get('gender'),
         bank_name=application_data.get('bank_name'),
         account_number=application_data.get('account_number'),
-        account_name=application_data.get('account_name')
+        account_name=application_data.get('account_name'),
+        status='pending'
     )
 
     admin_message = (
-        f"🧑‍🍳 New Waiter Application:\n"
+        f"🧑‍🍳 New Worker Application:\n"
         f"Name: {application_data.get('name')}\n"
         f"User: @{user.username}\n"
         f"Phone: {application_data.get('phone')}\n"
@@ -578,7 +578,7 @@ async def worker_account_name(update: Update, context: CallbackContext) -> int:
 
     await update.message.reply_text(
         "✅ Thank you for applying to become a Willis Kitchen worker.\n"
-        "Your request is being processed."
+        "Your application is pending review."
     )
     return ConversationHandler.END
 
@@ -588,43 +588,23 @@ async def handle_worker_approval(update: Update, context: CallbackContext) -> No
     query = update.callback_query
     await query.answer()
 
-    application_id = int(query.data.split("_")[-1])
-    action = query.data.split("_")[0]
-
-    apps = get_worker_applications()
-    application_data = next((app for app in apps if app.get('application_id') == application_id), None)
-
-    if not application_data:
-        await send_or_edit_message(update, "Application not found.")
-        return
-
-    user_id = application_data.get('user_id')
+    user_id = int(query.data.split("_")[-1])
+    action = query.data.split("_")[0] # 'approve' or 'reject'
 
     if action == "approve":
-        update_worker_application_status(application_id, 'approved')
-        add_worker(
-            user_id=user_id,
-            name=application_data.get('name'),
-            reg_no=application_data.get('reg_no'),
-            matric_no=application_data.get('matric_no'),
-            phone=application_data.get('phone'),
-            gender=application_data.get('gender'),
-            bank_name=application_data.get('bank_name'),
-            account_number=application_data.get('account_number'),
-            account_name=application_data.get('account_name')
-        )
+        update_worker_status(user_id, 'approved')
         await context.bot.send_message(
             chat_id=user_id,
             text="🎉 Congratulations! You’ve been approved as a Willis Kitchen worker."
         )
-        await send_or_edit_message(update, f"Application {application_id} approved.")
+        await send_or_edit_message(update, f"Worker {user_id} approved.")
     else:  # Reject
-        update_worker_application_status(application_id, 'rejected')
+        update_worker_status(user_id, 'rejected')
         await context.bot.send_message(
             chat_id=user_id,
-            text="❌ Your application was not approved at this time."
+            text="❌ Your worker application was not approved at this time."
         )
-        await send_or_edit_message(update, f"Application {application_id} rejected.")
+        await send_or_edit_message(update, f"Worker {user_id} rejected.")
 
 
 async def share_command(update: Update, context: CallbackContext) -> None:
@@ -714,14 +694,14 @@ async def get_extra_notes(update: Update, context: CallbackContext) -> int:
 async def ask_for_extra_notes(update: Update, context: CallbackContext) -> int:
     """Asks the user for extra notes."""
     message = "Would you like to add any extra notes for the chef or delivery person? (Type /skip if none)"
-
+    
     # We need to handle both callback query and message updates
     if update.callback_query:
         await send_or_edit_message(update, message)
     else:
         # This case happens when the user just entered a quantity
         await update.message.reply_text(message)
-
+        
     return GET_EXTRA_NOTES
 
 
@@ -805,7 +785,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
         return
 
     update_order_status(order_id, 'taken', worker_id)
-
+    
     # Notify the admin that the order has been accepted
     await notify_admin_of_accepted_order(context, order_id, worker_id)
 
@@ -823,7 +803,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
     if user_id:
         try:
             await context.bot.send_message(chat_id=user_id, text="Your order has been accepted 🎉")
-
+            
             user_keyboard = [
                 [InlineKeyboardButton("✅ Order Delivered", callback_data=f"user_delivered_{order_id}")],
                 [InlineKeyboardButton("❌ Not Delivered", callback_data=f"user_not_delivered_{order_id}")],
@@ -873,7 +853,7 @@ async def user_delivered_order(update: Update, context: CallbackContext) -> None
     """Handles a user marking an order as delivered."""
     query = update.callback_query
     await query.answer()
-
+    
     # Remove buttons from the original message
     await query.edit_message_reply_markup(reply_markup=None)
     # Send a new confirmation message
@@ -884,7 +864,7 @@ async def user_not_delivered_order(update: Update, context: CallbackContext) -> 
     """Asks the user to explain the delivery issue."""
     query = update.callback_query
     await query.answer()
-
+    
     order_id = int(query.data.split("_")[-1])
     context.user_data["issue_order_id"] = order_id
     
@@ -1580,7 +1560,7 @@ async def custard_quantity(update: Update, context: CallbackContext) -> int:
 
     # Remove any existing base custard item to avoid duplicates
     items = [item for item in items if item.get("type") != "base"]
-
+    
     unit_price = 0 if order.get("source") == "own" else PRICES.get("custard", 0)
     item_name = "Custard (Customer's Own)" if order.get("source") == "own" else "Custard"
 
@@ -1607,7 +1587,7 @@ async def custard_source(update: Update, context: CallbackContext) -> int:
     await query.answer()
     source = query.data.split("_")[-1]
     context.user_data["order"]["source"] = source
-
+    
     await send_or_edit_message(update, "How many custard cups would you like to make?")
     return CUSTARD_QUANTITY
 
@@ -1772,7 +1752,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         name = item.get("name", "Unknown Item").title()
         quantity = item.get("quantity", 0)
         total_price = item.get("total_price", 0)
-        summary += f"- {name} (x{quantity}) => ₦{total_price}\n"
+        summary += f"- {name} (x{quantity}) = ₦{total_price}\n"
         
     # Add notes to the summary if they exist
     if order.get("notes"):
@@ -1818,6 +1798,7 @@ async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
         food_type=order["food"],
         items=order.get("items", []),
         total=order["total"],
+        service_charge=order.get("service_charge", 0),
         status='pending_payment',
         delivery_info=delivery_info,
         notes=order.get("notes")
@@ -1932,9 +1913,9 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         service_charge = base_item_quantity * 250
     elif order.get("food") == "Cafe Order":
         service_charge = (subtotal // 500) * 100
-
+    
     total = subtotal + service_charge
-
+    
     bill += f"Service Charge: ₦{service_charge}\n"
     bill += "----------------------\n"
     bill += f"💰 <b>Total = ₦{total}</b>"
@@ -2155,9 +2136,8 @@ async def admin_orders_menu(update: Update, context: CallbackContext) -> int:
 
 def admin_workers_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("View Workers", callback_data="view_workers_admin")],
-        [InlineKeyboardButton("View Active Applications", callback_data="view_active_apps")],
-        [InlineKeyboardButton("View All Applications", callback_data="view_all_apps")],
+        [InlineKeyboardButton("View All Workers", callback_data="view_workers_admin")],
+        [InlineKeyboardButton("View Pending Applications", callback_data="view_pending_apps")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
     ])
 
@@ -2337,41 +2317,42 @@ async def admin_view_order_details(update: Update, context: CallbackContext) -> 
     return ADMIN_MENU
 
 async def view_workers_admin(update: Update, context: CallbackContext) -> int:
-    """Displays all approved workers."""
+    """Displays all workers, regardless of status."""
     query = update.callback_query
     await query.answer()
-    workers_data = get_all_workers(active_only=False)
+    workers_data = get_all_workers(approved_only=False)
     if not workers_data:
         await send_or_edit_message(update, "No registered workers yet.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
-    message = "👷‍♂️ Approved Workers:\n"
+    message = "👷‍♂️ All Workers:\n"
     for worker in workers_data:
-        message += f"Name: {worker.get('name')}, User ID: {worker.get('user_id')}\n"
+        message += f"Name: {worker.get('name')}, User: @{worker.get('username', 'N/A')}, Status: {worker.get('status', 'N/A')}\n"
     await send_or_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
 
-async def view_active_applications_admin(update: Update, context: CallbackContext) -> int:
-    """Displays pending worker applications."""
+async def view_pending_applications_admin(update: Update, context: CallbackContext) -> int:
+    """Displays pending worker applications from the Workers sheet."""
     query = update.callback_query
     await query.answer()
-    applications_data = get_worker_applications(status='pending')
+    applications_data = get_workers_by_status('pending')
     if not applications_data:
-        await send_or_edit_message(update, "No active applications.", reply_markup=admin_workers_menu_keyboard())
+        await send_or_edit_message(update, "No pending applications.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
 
     for app in applications_data:
-        app_id = app.get('application_id')
-        message = f"App ID: {app_id}, Name: {app.get('name')}, User: @{app.get('username')}, Phone: {app.get('phone')}"
+        user_id = app.get('user_id')
+        message = f"Pending App for: {app.get('name')} (@{app.get('username')})\nPhone: {app.get('phone')}"
         keyboard = [
             [
-                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{app_id}"),
-                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{app_id}"),
+                InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user_id}"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.reply_text(message, reply_markup=reply_markup)
     return ADMIN_MENU
+
 
 async def handle_admin_order_action(update: Update, context: CallbackContext) -> None:
     """Handles admin decisions on active orders."""
@@ -2420,21 +2401,6 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
     )
     await update.message.reply_text("Thank you for your feedback! It has been recorded.")
     return ConversationHandler.END
-
-async def view_all_applications_admin(update: Update, context: CallbackContext) -> int:
-    """Displays all worker applications."""
-    query = update.callback_query
-    await query.answer()
-    applications_data = get_worker_applications()
-    if not applications_data:
-        await send_or_edit_message(update, "No applications found.", reply_markup=admin_workers_menu_keyboard())
-        return ADMIN_MENU
-
-    message = "📋 All Applications:\n"
-    for app in applications_data:
-        message += f"ID: {app.get('application_id')}, Name: {app.get('name')}, User: @{app.get('username')}, Status: {app.get('status')}\n"
-    await send_or_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
-    return ADMIN_MENU
 
 
 async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
@@ -2571,8 +2537,7 @@ async def main() -> None:
                 CallbackQueryHandler(view_taken_orders_admin, pattern="^view_taken_orders_admin$"),
                 CallbackQueryHandler(view_all_orders_admin, pattern=r"^view_all_orders_admin(_page_\d+)?$"),
                 CallbackQueryHandler(view_workers_admin, pattern="^view_workers_admin$"),
-                CallbackQueryHandler(view_active_applications_admin, pattern="^view_active_apps$"),
-                CallbackQueryHandler(view_all_applications_admin, pattern="^view_all_apps$"),
+                CallbackQueryHandler(view_pending_applications_admin, pattern="^view_pending_apps$"),
                 CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
             ],
             ADMIN_CHECKIN_MENU: [

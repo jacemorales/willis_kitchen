@@ -21,7 +21,6 @@ spreadsheet = client.open(SPREADSHEET_NAME)
 users_sheet = spreadsheet.worksheet("Users")
 orders_sheet = spreadsheet.worksheet("Orders")
 workers_sheet = spreadsheet.worksheet("Workers")
-worker_applications_sheet = spreadsheet.worksheet("WorkerApplications")
 feedback_sheet = spreadsheet.worksheet("Feedback")
 payments_sheet = spreadsheet.worksheet("Payments")
 
@@ -44,9 +43,9 @@ def get_all_unique_users():
     user_ids = users_sheet.col_values(1)[1:] # Skip header
     return [int(uid) for uid in user_ids if uid.isdigit()]
 
-def add_order(user_id, username, food_type, items, total, status='pending', delivery_info=None, notes=None):
+def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None):
     """Adds a new order to the Orders sheet."""
-    order_id = int(time.time() * 1000) # milliseconds timestamp as order_id
+    order_id = int(time.time() * 1000)  # milliseconds timestamp as order_id
     order_date = datetime.now().isoformat()
     
     # Ensure complex data is stored as JSON strings
@@ -55,7 +54,7 @@ def add_order(user_id, username, food_type, items, total, status='pending', deli
 
     new_row = [
         order_id, user_id, username, food_type, items_str, total,
-        order_date, status, delivery_info_str, notes, "" # taken_by is initially empty
+        service_charge, order_date, status, delivery_info_str, notes, ""  # taken_by is initially empty
     ]
     orders_sheet.append_row(new_row)
     add_or_update_user(user_id, username, "") # Log user activity
@@ -102,37 +101,30 @@ def update_order_status(order_id, status, worker_id=None, delivery_issue=None):
     except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 
-def add_worker_application(user_id, username, name, reg_no, matric_no, phone, gender):
-    """Adds a new worker application."""
-    app_id = int(time.time() * 1000)
-    new_row = [app_id, user_id, username, name, reg_no, matric_no, phone, 'pending', gender]
-    worker_applications_sheet.append_row(new_row)
-
-def get_worker_applications(status=None):
-    """Retrieves worker applications, optionally filtering by status."""
-    all_apps = worker_applications_sheet.get_all_records()
-    if status:
-        return [app for app in all_apps if app.get('status') == status]
-    return all_apps
-
-def update_worker_application_status(application_id, status):
-    """Updates the status of a worker application."""
-    try:
-        cell = worker_applications_sheet.find(str(application_id), in_column=1)
-        # Column 8 is 'status'
-        worker_applications_sheet.update_cell(cell.row, 8, status)
-    except AttributeError:
-        print(f"Error: Application ID {application_id} not found.")
-
-def add_worker(user_id, name, reg_no, matric_no, phone, gender, bank_name=None, account_number=None, account_name=None):
-    """Adds a new approved worker with empty payout columns."""
+def add_worker(user_id, name, reg_no, matric_no, phone, gender, bank_name=None, account_number=None, account_name=None, status='pending'):
+    """Adds a new worker application to the Workers sheet with a 'pending' status."""
     new_row = [
-        user_id, name, reg_no, matric_no, phone, 'active', gender,
+        user_id, name, reg_no, matric_no, phone, status, gender,
         bank_name, account_number, account_name,
         json.dumps([]),  # Payout (empty array)
         0  # Total Payout
     ]
     workers_sheet.append_row(new_row)
+
+def get_workers_by_status(status):
+    """Retrieves workers from the sheet, filtering by status."""
+    all_workers = workers_sheet.get_all_records()
+    statuses = status if isinstance(status, tuple) else (status,)
+    return [worker for worker in all_workers if worker.get('status') in statuses]
+
+def update_worker_status(user_id, new_status):
+    """Updates the status of a worker."""
+    try:
+        cell = workers_sheet.find(str(user_id), in_column=1)
+        # Column 6 is 'status'
+        workers_sheet.update_cell(cell.row, 6, new_status)
+    except AttributeError:
+        print(f"Error: Worker with User ID {user_id} not found.")
 
 def update_worker_payout(worker_id, order_id, payout_amount):
     """Adds a payout record to a worker's profile and updates the total."""
@@ -156,16 +148,16 @@ def update_worker_payout(worker_id, order_id, payout_amount):
     except json.JSONDecodeError:
         print(f"Error: Could not parse payout data for worker {worker_id}.")
 
-def get_all_workers(active_only=True):
-    """Retrieves all workers."""
+def get_all_workers(approved_only=True):
+    """Retrieves all workers, defaulting to only approved ones."""
     all_workers = workers_sheet.get_all_records()
-    if active_only:
-        return [w for w in all_workers if w.get('status') == 'active']
+    if approved_only:
+        return [w for w in all_workers if w.get('status') == 'approved']
     return all_workers
 
 def is_worker(user_id):
-    """Checks if a user is an active worker."""
-    all_workers = get_all_workers(active_only=True)
+    """Checks if a user is an approved worker."""
+    all_workers = get_all_workers(approved_only=True)
     return any(worker.get('user_id') == user_id for worker in all_workers)
 
 def get_worker_orders(worker_id, status):
