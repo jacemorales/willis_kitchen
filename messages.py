@@ -46,3 +46,23 @@ CASUAL = [
     "Feeling a little hungry? 😋 Just a friendly reminder that a delicious, custom-made meal is just a few taps away. 📲 Skip the instant noodles and let us make you something truly special. ✨ Our chefs 🧑‍🍳 are waiting for your order! 👨‍🍳",
     "Just popping in to say we hope you're having an amazing week! ✨ Don't forget to take a break and refuel with something tasty. 😋 From our kitchen to your room 🚪, we're always ready to serve you a little plate of happiness. 😊 What can we get for you today? 🤔"
 ]
+
+FAQ_MESSAGE = """
+- How long does delivery take?
+Delivery typically takes 15-25 minutes, but this can vary based on the number of orders we have at the moment.
+
+- What are your opening hours?
+We are open from 9 AM to 9 PM, every day of the week.
+
+- Can I customize my order?
+Absolutely! You can add or remove ingredients from the menu options to create your perfect meal. Just use the 'notes' section for any special requests.
+
+- What payment methods do you accept?
+We currently accept online payments through the provided link. You will be asked to upload a screenshot of your payment to confirm the order.
+
+- How can I track my order?
+You will receive a notification once your order is accepted by a worker.
+
+- I have an issue with my order. What should I do?
+Please use the "Not Delivered" button for the respective order and describe the issue. Our team will look into it and get back to you as soon as possible.
+"""
