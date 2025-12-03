@@ -61,7 +61,7 @@ Absolutely! You can add or remove ingredients from the menu options to create yo
 We currently accept online payments through the provided link. You will be asked to upload a screenshot of your payment to confirm the order.
 
 - How can I track my order?
-You will receive a notification once your order is accepted by a worker.
+You will receive a notification once your order is accepted by a worker. You can then track the status of your order from the "My Orders" section.
 
 - I have an issue with my order. What should I do?
 Please use the "Not Delivered" button for the respective order and describe the issue. Our team will look into it and get back to you as soon as possible.

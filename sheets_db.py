@@ -90,14 +90,14 @@ def update_order_status(order_id, status, worker_id=None, delivery_issue=None):
     """Updates the status, taken_by, and delivery_issue fields of an order."""
     try:
         cell = orders_sheet.find(str(order_id), in_column=1)
-        # Column 8 is 'status'
-        orders_sheet.update_cell(cell.row, 8, status)
+        # Column 9 is 'status'
+        orders_sheet.update_cell(cell.row, 9, status)
         if worker_id:
-            # Column 11 is 'taken_by'
-            orders_sheet.update_cell(cell.row, 11, worker_id)
+            # Column 12 is 'taken_by'
+            orders_sheet.update_cell(cell.row, 12, worker_id)
         if delivery_issue:
-            # Column 12 is 'delivery_issue'
-            orders_sheet.update_cell(cell.row, 12, delivery_issue)
+            # Column 13 is 'delivery_issue'
+            orders_sheet.update_cell(cell.row, 13, delivery_issue)
     except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 

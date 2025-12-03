@@ -118,7 +118,7 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         items = []
     for item in items:
         item_name = item.get('name', 'N/A').replace('_', ' ').title()
-        summary += f"- {item_name} (x{item.get('quantity', 0)}) = ₦{item.get('total_price', 0)}\n"
+        summary += f"- {item_name} (x{item.get('quantity', 0)})\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
@@ -152,7 +152,7 @@ async def get_order_summary_for_customer(order: dict) -> str:
         items = []
     for item in items:
         item_name = item.get('name', 'N/A').replace('_', ' ').title()
-        summary += f"- {item_name} (x{item.get('quantity', 0)}) = ₦{item.get('total_price', 0)}\n"
+        summary += f"- {item_name} (x{item.get('quantity', 0)})\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
@@ -642,7 +642,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
     worker_id = update.effective_user.id
     order = get_order_by_id(order_id)
 
-    if not order or order.get('status') != 'pending':
+    if not order or order.get('status') not in ['pending', 'pending_payment']:
         await send_or_edit_message(update, "This order has already been taken or is no longer available.")
         return
 
@@ -1554,12 +1554,7 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
     )
     update_order_status(order_id, 'pending')
 
-    # Send the first confirmation message
-    await update.message.reply_text(
-        "✅ Payment received! Your order has been placed and our workers have been notified."
-    )
-
-    # Send the second message with the order summary
+    # Send the order summary
     order_summary = await get_order_summary_for_customer(order)
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -1573,7 +1568,7 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
         await notify_admin_of_new_kitchen_order(context, order_id)
 
     await update.message.reply_text(
-        "You will receive a notification once your order is accepted."
+        "✅ Payment received! Your order has been placed and you will be notified once it's accepted."
     )
     return ConversationHandler.END
 
