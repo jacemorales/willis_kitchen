@@ -29,6 +29,9 @@ from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL, FAQ_MESSAGE
 )
 
+# Fixed fees
+PACK_FEE = 300
+
 # Centralized price list for all items, using underscores for consistency
 PRICES = {
     # Indomie base prices
@@ -126,12 +129,13 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         service_charge = 0
     worker_payout = get_worker_payout(service_charge)
     
-    if for_admin:
-        summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
-    
     if order.get('food_type') == 'Cafe Order':
+        if for_admin:
+            summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
         summary += f"<b>Worker Payout:</b> ₦{worker_payout}\n"
-    
+    elif for_admin: # For Kitchen Orders, only admin sees service charge
+        summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
+
     return summary
 
 
@@ -630,7 +634,7 @@ async def view_worker_orders(update: Update, context: CallbackContext) -> int:
 
 
 async def worker_accept_order(update: Update, context: CallbackContext) -> None:
-    """Handles a worker accepting an order."""
+    """Handles a worker or admin accepting an order."""
     query = update.callback_query
     await query.answer()
 
@@ -643,31 +647,79 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
         return
 
     update_order_status(order_id, 'taken', worker_id)
-    
-    await notify_admin_of_accepted_order(context, order_id, worker_id)
 
+    # Notify admin if a worker accepted it
+    if worker_id != ADMIN_ID:
+        await notify_admin_of_accepted_order(context, order_id, worker_id)
+
+    # --- Worker/Admin Flow ---
+    # 1. Remove buttons from original message
+    await query.edit_message_reply_markup(reply_markup=None)
+    # 2. Send confirmation message
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"✅ You have accepted order #{order_id}."
+    )
+    # 3. Send new message with details and action buttons
+    worker_summary = await get_order_summary_for_worker(order, for_admin=(worker_id == ADMIN_ID))
     worker_keyboard = [
         [InlineKeyboardButton("✅ Order Delivered", callback_data=f"worker_delivered_{order_id}")],
         [InlineKeyboardButton("❌ Not Delivered", callback_data=f"worker_not_delivered_{order_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(worker_keyboard)
-    summary = await get_order_summary_for_worker(order)
-    await send_or_edit_message(update, f"You have accepted this order:\n\n{summary}", reply_markup=reply_markup, parse_mode='HTML')
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=worker_summary,
+        reply_markup=reply_markup,
+        parse_mode='HTML'
+    )
 
+    # --- User Flow ---
     user_id = order.get('user_id')
     if user_id:
         try:
+            # 1. Send acceptance notification
             await context.bot.send_message(chat_id=user_id, text="Your order has been accepted 🎉")
-            
+            # 2. Send new message with summary and action buttons
+            user_summary = await get_order_summary_for_customer(order)
             user_keyboard = [
                 [InlineKeyboardButton("✅ Order Delivered", callback_data=f"user_delivered_{order_id}")],
                 [InlineKeyboardButton("❌ Not Delivered", callback_data=f"user_not_delivered_{order_id}")],
             ]
             user_reply_markup = InlineKeyboardMarkup(user_keyboard)
-            user_summary = await get_order_summary_for_customer(order)
-            await context.bot.send_message(chat_id=user_id, text=user_summary, reply_markup=user_reply_markup, parse_mode='HTML')
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=user_summary,
+                reply_markup=user_reply_markup,
+                parse_mode='HTML'
+            )
         except Exception as e:
             logger.error(f"Failed to send order acceptance notification to user {user_id}: {e}")
+
+
+async def decline_order(update: Update, context: CallbackContext) -> int:
+    """Handles an admin declining an order."""
+    query = update.callback_query
+    await query.answer()
+
+    order_id = int(query.data.split("_")[-1])
+    update_order_status(order_id, 'rejected')
+
+    await query.edit_message_text(f"You have rejected order #{order_id}.")
+
+    # Notify user
+    order = get_order_by_id(order_id)
+    if order and order.get('user_id'):
+        user_id = order.get('user_id')
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"Unfortunately, your order #{order_id} has been declined by the admin."
+            )
+        except Exception as e:
+            logger.error(f"Failed to send order decline notification to user {user_id}: {e}")
+
+    return ADMIN_MENU
 
 
 async def worker_delivered_order(update: Update, context: CallbackContext) -> None:
@@ -1422,7 +1474,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     items = order.get("items", [])
     subtotal = sum(item.get("total_price", 0) for item in items)
 
-    pack_fee = 300 if order.get("food") in ["Indomie", "Custard"] else 0
+    pack_fee = PACK_FEE if order.get("food") in ["Indomie", "Custard"] else 0
 
     service_charge = 0
     if order.get("food") in ["Indomie", "Custard"]:
@@ -1432,7 +1484,6 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         service_charge = (subtotal // 500) * 100
 
     total = subtotal + service_charge + pack_fee
-    order["pack_fee"] = pack_fee
     order["service_charge"] = service_charge
     order["total"] = total
 
@@ -1476,8 +1527,7 @@ async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
     order_id = add_order(
         user_id=update.effective_user.id, username=update.effective_user.username,
         food_type=order["food"], items=order.get("items", []), total=order["total"],
-        service_charge=order.get("service_charge", 0),
-        pack_fee=order.get("pack_fee", 0), status='pending_payment',
+        service_charge=order.get("service_charge", 0), status='pending_payment',
         delivery_info=delivery_info, notes=order.get("notes")
     )
     context.user_data["order_id"] = order_id
@@ -1504,13 +1554,25 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
     )
     update_order_status(order_id, 'pending')
 
+    # Send the first confirmation message
+    await update.message.reply_text(
+        "✅ Payment received! Your order has been placed and our workers have been notified."
+    )
+
+    # Send the second message with the order summary
+    order_summary = await get_order_summary_for_customer(order)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=order_summary,
+        parse_mode='HTML'
+    )
+
     if order.get('food_type') == 'Cafe Order':
         await notify_workers(context, order_id)
     else:
         await notify_admin_of_new_kitchen_order(context, order_id)
 
     await update.message.reply_text(
-        "✅ Payment received! Your order has been placed and our workers have been notified.\n"
         "You will receive a notification once your order is accepted."
     )
     return ConversationHandler.END
@@ -1539,7 +1601,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         else:
             bill += f"• {name} ({quantity} × ₦{unit_price}) = ₦{item_total}\n"
 
-    pack_fee = order.get("pack_fee", 0)
+    pack_fee = PACK_FEE if order.get("food") in ["Indomie", "Custard"] else 0
     service_charge = order.get("service_charge", 0)
     total = order.get("total", 0)
     
@@ -1804,7 +1866,7 @@ async def admin_payments_menu(update: Update, context: CallbackContext) -> int:
             if screenshot_file_id:
                 await context.bot.send_photo(chat_id=update.effective_chat.id, photo=screenshot_file_id, caption=caption)
             else:
-                 await query.message.reply_text(f"No payment image for Order #{order_id}.")
+                await query.message.reply_text(f"No payment image for Order #{order_id}.")
         except Exception:
             await query.message.reply_text(f"Could not load payment image for Order #{order_id}.")
 
@@ -2001,8 +2063,8 @@ async def main() -> None:
                 CallbackQueryHandler(view_pending_applications_admin, pattern="^view_pending_apps$"),
                 CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
                 CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"),
-                CallbackQueryHandler(review_order, pattern="^review_"),
                 CallbackQueryHandler(worker_accept_order, pattern="^accept_"),
+                CallbackQueryHandler(decline_order, pattern="^decline_"),
             ],
             ADMIN_CHECKIN_MENU: [
                 CallbackQueryHandler(handle_checkin_broadcast, pattern="^checkin_(rainy|cold|hot|sunday|casual)$"),
@@ -2096,6 +2158,7 @@ async def main() -> None:
     
     # Top-level handlers
     application.add_handler(CommandHandler("share", share_command))
+    application.add_handler(CallbackQueryHandler(review_order, pattern="^review_"))
     application.add_handler(CallbackQueryHandler(worker_accept_order, pattern="^accept_"))
     application.add_handler(CallbackQueryHandler(worker_delivered_order, pattern="^worker_delivered_"))
     application.add_handler(CallbackQueryHandler(worker_not_delivered_order, pattern="^worker_not_delivered_"))
