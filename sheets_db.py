@@ -43,21 +43,21 @@ def get_all_unique_users():
     user_ids = users_sheet.col_values(1)[1:] # Skip header
     return [int(uid) for uid in user_ids if uid.isdigit()]
 
-def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None):
+def add_order(user_id, username, food_type, items, total, service_charge, pack_fee=0, status='pending', delivery_info=None, notes=None):
     """Adds a new order to the Orders sheet."""
     order_id = int(time.time() * 1000)  # milliseconds timestamp as order_id
     order_date = datetime.now().isoformat()
-    
+
     # Ensure complex data is stored as JSON strings
     items_str = json.dumps(items)
     delivery_info_str = json.dumps(delivery_info if delivery_info else {})
 
     new_row = [
-        order_id, user_id, username, food_type, items_str, total,
-        service_charge, order_date, status, delivery_info_str, notes, ""  # taken_by is initially empty
+        order_id, user_id, username, food_type, items_str, total, service_charge,
+        pack_fee, order_date, status, delivery_info_str, notes, "", ""  # taken_by and delivery_issue are initially empty
     ]
     orders_sheet.append_row(new_row)
-    add_or_update_user(user_id, username, "") # Log user activity
+    add_or_update_user(user_id, username, "")  # Log user activity
     return order_id
 
 def get_user_orders(user_id):
@@ -130,19 +130,19 @@ def update_worker_payout(worker_id, order_id, payout_amount):
     """Adds a payout record to a worker's profile and updates the total."""
     try:
         cell = workers_sheet.find(str(worker_id), in_column=1)
-
+        
         # Get current payout list (column 11)
         payouts_str = workers_sheet.cell(cell.row, 11).value
         payouts = json.loads(payouts_str) if payouts_str else []
-
+        
         # Add new payout record
         payouts.append({"order_id": order_id, "payout": payout_amount})
         workers_sheet.update_cell(cell.row, 11, json.dumps(payouts))
-
+        
         # Update total payout (column 12)
         total_payout = sum(p['payout'] for p in payouts)
         workers_sheet.update_cell(cell.row, 12, total_payout)
-
+        
     except (AttributeError, gspread.exceptions.CellNotFound):
         print(f"Error: Worker ID {worker_id} not found.")
     except json.JSONDecodeError:

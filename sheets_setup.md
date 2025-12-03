@@ -26,8 +26,8 @@ This sheet stores information about every user who interacts with the bot.
 ### `Orders` Sheet
 This sheet contains a record of every order placed.
 
-| order_id | user_id | username | food_type | items | total | service_charge | order_date | status | delivery_info | notes | taken_by | delivery_issue |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| order_id | user_id | username | food_type | items | total | service_charge | pack_fee | order_date | status | delivery_info | notes | taken_by | delivery_issue |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **order_id**: A unique ID for the order (e.g., a timestamp or an incrementing number).
 - **user_id**: The Telegram user ID of the person who placed the order.
@@ -36,6 +36,7 @@ This sheet contains a record of every order placed.
 - **items**: A JSON string representing the list of items in the order.
 - **total**: The total cost of the order.
 - **service_charge**: The calculated service charge for the order.
+- **pack_fee**: A fixed fee for packaging kitchen orders.
 - **order_date**: The timestamp when the order was placed.
 - **status**: The current status of the order (e.g., `pending_payment`, `pending`, `taken`, `accepted`, `rejected`).
 - **delivery_info**: A JSON string containing delivery details like `hall_and_room_number` and `delivery_time`.
