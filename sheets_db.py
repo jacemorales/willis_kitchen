@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 import time
 from gspread_client import get_sheets_client
+from utils import format_date
 
 # It's recommended to store the spreadsheet name in an environment variable
 # for flexibility, but for this task, we will hardcode it.
@@ -29,11 +30,11 @@ def add_or_update_user(user_id, username, first_name):
     try:
         cell = users_sheet.find(str(user_id), in_column=1)
         # User exists, update last_login
-        now = datetime.now().isoformat()
+        now = format_date()
         users_sheet.update_cell(cell.row, 4, now)
     except AttributeError:
         # User does not exist, add new row
-        now = datetime.now().isoformat()
+        now = format_date()
         new_row = [user_id, username, first_name, now]
         users_sheet.append_row(new_row)
 
@@ -43,21 +44,22 @@ def get_all_unique_users():
     user_ids = users_sheet.col_values(1)[1:] # Skip header
     return [int(uid) for uid in user_ids if uid.isdigit()]
 
-def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None):
+def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None, spaghetti_quantity=None):
     """Adds a new order to the Orders sheet."""
-    order_id = int(time.time() * 1000)  # milliseconds timestamp as order_id
-    order_date = datetime.now().isoformat()
+    order_id = int(time.time() * 1000)
+    order_date = format_date()
     
-    # Ensure complex data is stored as JSON strings
     items_str = json.dumps(items)
     delivery_info_str = json.dumps(delivery_info if delivery_info else {})
 
+    # The new column 'spaghetti_quantity' will be column 14
     new_row = [
         order_id, user_id, username, food_type, items_str, total,
-        service_charge, order_date, status, delivery_info_str, notes, "", ""
+        service_charge, order_date, status, delivery_info_str, notes,
+        "", "", spaghetti_quantity if spaghetti_quantity else ""
     ]
     orders_sheet.append_row(new_row)
-    add_or_update_user(user_id, username, "") # Log user activity
+    add_or_update_user(user_id, username, "")
     return order_id
 
 def get_user_orders(user_id):
@@ -161,7 +163,7 @@ def is_worker(user_id):
     return any(worker.get('user_id') == user_id for worker in all_workers)
 
 def get_worker_orders(worker_id, status):
-    """Retrieves orders taken by a worker with a specific status."""
+    """Retrievis orders taken by a worker with a specific status."""
     all_orders = orders_sheet.get_all_records()
     return [
         order for order in all_orders 
@@ -171,7 +173,7 @@ def get_worker_orders(worker_id, status):
 def add_feedback(user_id, username, name, feedback_text):
     """Adds customer feedback."""
     feedback_id = int(time.time() * 1000)
-    timestamp = datetime.now().isoformat()
+    timestamp = format_date()
     new_row = [feedback_id, user_id, username, name, feedback_text, timestamp]
     feedback_sheet.append_row(new_row)
 
@@ -182,7 +184,7 @@ def get_all_feedback():
 def add_payment(order_id, screenshot_file_id, username, total):
     """Adds a payment record."""
     payment_id = int(time.time() * 1000)
-    timestamp = datetime.now().isoformat()
+    timestamp = format_date()
     new_row = [payment_id, order_id, screenshot_file_id, username, total, timestamp]
     payments_sheet.append_row(new_row)
 
