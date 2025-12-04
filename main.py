@@ -1686,38 +1686,40 @@ async def cancel(update: Update, context: CallbackContext) -> int:
 async def show_order_summary(update: Update, context: CallbackContext) -> int:
     """Calculates the total price and shows the simplified order summary."""
     order = context.user_data["order"]
-    items = order.get("items", [])
-    subtotal = sum(item.get("total_price", 0) for item in items)
+    current_items = order.get("items", []).copy() # Work with a copy
+    subtotal = sum(item.get("total_price", 0) for item in current_items)
 
     pack_fee = PRICES.get("pack_fee", 0) if order.get("food") in ["Indomie", "Custard", "Spaghetti"] else 0
 
     service_charge = 0
     if order.get("food") == "Indomie":
-        base_item_quantity = sum(item.get('quantity', 0) for item in items if item.get("type") == "base")
+        base_item_quantity = sum(item.get('quantity', 0) for item in current_items if item.get("type") == "base")
         service_charge = base_item_quantity * PRICES.get("service_charge_indomie", 250)
     elif order.get("food") == "Custard":
-        base_item_quantity = sum(item.get('quantity', 0) for item in items if item.get("type") == "base")
+        base_item_quantity = sum(item.get('quantity', 0) for item in current_items if item.get("type") == "base")
         service_charge = base_item_quantity * PRICES.get("service_charge_custard", 250)
     elif order.get("food") in ["Cafe Order", "Shopping Mall"]:
         service_charge = (subtotal // 500) * 100
     elif order.get("food") == "Spaghetti":
-        items = [item for item in items if item.get("type") != "fixed_cost"]
+        # For spaghetti, we modify the items list to add the ingredients cost
+        current_items = [item for item in current_items if item.get("type") != "fixed_cost"]
         if order.get("spaghetti_quantity") == "half":
-            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_half"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_half")})
+            current_items.append({"name": "Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_half"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_half")})
             service_charge = PRICES.get("service_charge_spaghetti_half")
         else:  # Full portion
-            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_full"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_full")})
+            current_items.append({"name": "Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_full"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_full")})
             service_charge = PRICES.get("service_charge_spaghetti_full")
+        order["items"] = current_items # Save the modified list back to the order context
 
-    total = subtotal + service_charge + pack_fee
+    # Recalculate subtotal in case spaghetti ingredients were added
+    subtotal_for_total = sum(item.get("total_price", 0) for item in current_items)
+    total = subtotal_for_total + service_charge + pack_fee
     order["service_charge"] = service_charge
     order["total"] = total
-    order["items"] = items  # Save the modified items list back to the order
 
     summary = "<b>Here is your order summary:</b>\n\n"
-    for item in items:
-        # Hide "Cost of Ingredients" from the initial summary
-        if item.get("type") == "fixed_cost":
+    for item in current_items:
+        if item.get("type") == "fixed_cost": # Don't show ingredients in this summary
             continue
         name = item.get("name", "Unknown Item").replace('_', ' ').title()
         quantity = item.get("quantity", 0)
@@ -1814,6 +1816,8 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
 
     items = order.get("items", [])
     for item in items:
+        if item.get("type") == "fixed_cost":
+            continue
         name = item.get("name", "N/A").replace('_', ' ').title()
         quantity = item.get("quantity", 0)
         unit_price = item.get("unit_price", 0)
