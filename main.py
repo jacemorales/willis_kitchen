@@ -30,10 +30,7 @@ from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL, FAQ_MESSAGE
 )
 
-# Fixed fees
-PACK_FEE = 300
-
-# Centralized price list for all items, using underscores for consistency
+# Centralized price list for all items, fees, and charges
 PRICES = {
     # Indomie base prices
     "small_chicken": 400,
@@ -67,8 +64,17 @@ PRICES = {
     "milk": 400,
 
     # Spaghetti items
-    "gishiri": 200,
-    "canned_corn": 1000,
+    "gashia": 1200,
+    "canned_corn": 2000,
+    "cost_of_ingredients_half": 3000,
+    "cost_of_ingredients_full": 6000,
+
+    # Fees and Service Charges
+    "pack_fee": 300,
+    "service_charge_indomie": 250,
+    "service_charge_custard": 250,
+    "service_charge_spaghetti_half": 1500,
+    "service_charge_spaghetti_full": 3000,
 }
 
 
@@ -252,7 +258,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_SOURCE,
     SPAGHETTI_SOURCE,
     SPAGHETTI_QUANTITY,
-    GET_GISHIRI_QUANTITY,
+    GET_GASHIA_QUANTITY,
     GET_CANNED_CORN_QUANTITY,
 ) = range(58)
 
@@ -1105,8 +1111,8 @@ async def ask_for_mixing_quantities(update: Update, context: CallbackContext) ->
             message_text, next_state = "Enter the amount for suya (₦):", INDOMIE_SUYA_AMOUNT
         elif next_mixing_to_ask == "sardine":
             message_text, next_state = "How many servings of sardine would you like?", INDOMIE_SARDINE_QUANTITY
-        elif next_mixing_to_ask == "gishiri":
-            message_text, next_state = "How many servings of gishiri would you like?", GET_GISHIRI_QUANTITY
+        elif next_mixing_to_ask == "gashia":
+            message_text, next_state = "How many servings of gashia would you like?", GET_GASHIA_QUANTITY
         elif next_mixing_to_ask == "canned_corn":
             message_text, next_state = "How many servings of canned corn would you like?", GET_CANNED_CORN_QUANTITY
         elif next_mixing_to_ask == "fried_fish" and order.get("food") == "Spaghetti":
@@ -1119,10 +1125,7 @@ async def ask_for_mixing_quantities(update: Update, context: CallbackContext) ->
         await send_or_edit_message(update, message_text)
         return next_state
     
-    # If it's a spaghetti order, skip toppings and go to beverages
-    if order.get("food") == "Spaghetti":
-        return await ask_for_beverages(update, context)
-
+    # For spaghetti, proceed to toppings after mixings. For Indomie, also proceed to toppings.
     return await indomie_toppings_menu(update, context)
 
 
@@ -1390,8 +1393,8 @@ async def get_fried_fish_quantity(update: Update, context: CallbackContext) -> i
         return await get_topping_quantity(update, context, "fried_fish", INDOMIE_FRIED_FISH_QUANTITY)
 
 
-async def get_gishiri_quantity(update: Update, context: CallbackContext) -> int:
-    return await get_mixing_quantity(update, context, "gishiri", GET_GISHIRI_QUANTITY)
+async def get_gashia_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_mixing_quantity(update, context, "gashia", GET_GASHIA_QUANTITY)
 
 
 async def get_canned_corn_quantity(update: Update, context: CallbackContext) -> int:
@@ -1623,49 +1626,36 @@ async def spaghetti_quantity(update: Update, context: CallbackContext) -> int:
     """Stores the quantity of spaghetti and sets the base price."""
     query = update.callback_query
     await query.answer()
-    quantity = query.data.split("_")[-1]  # 'half' or 'full'
+    quantity_type = query.data.split("_")[-1]  # 'half' or 'full'
 
     order = context.user_data["order"]
-    order["spaghetti_quantity"] = quantity
+    order["spaghetti_quantity"] = quantity_type
     items = order.get("items", [])
-    # Remove any existing base item to avoid duplicates
     items = [item for item in items if item.get("type") != "base"]
     
     unit_price = 0
-    item_name = "Spaghetti"
-    if order.get("source") == "own":
-        item_name = "Spaghetti (Customer's Own)"
-    else:  # Using kitchen's spaghetti, so set the price
-        if quantity == "half":
-            unit_price = 1300
-        else:  # full
-            unit_price = 2600
+    if order.get("source") == "kitchen":
+        unit_price = 1300 if quantity_type == "half" else 2600
 
+    item_name = f"Spaghetti ({'Half Portion' if quantity_type == 'half' else 'Full Portion'})"
+    
     items.append({
         "name": item_name,
         "type": "base",
         "unit_price": unit_price,
-        "quantity": 1,  # It's one portion (half or full)
+        "quantity": 1,
         "total_price": unit_price,
     })
     order["items"] = items
 
-    # Directly proceed to mixings, as spaghetti flow is simpler
     return await spaghetti_mixings_menu(update, context)
 
 
 def spaghetti_mixings_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Gishiri (₦200)", callback_data="mixing_gishiri"),
-            InlineKeyboardButton("Canned Corn (₦1000)", callback_data="mixing_canned_corn"),
-        ],
-        [
-            InlineKeyboardButton("Vegetables (₦800)", callback_data="mixing_vegetables"),
-            InlineKeyboardButton("Suya (price-based)", callback_data="mixing_suya"),
-        ],
-        [
-            InlineKeyboardButton("Fried Fish (₦1500)", callback_data="mixing_fried_fish"),
+            InlineKeyboardButton(f"Gashia (₦{PRICES.get('gashia', 0)})", callback_data="mixing_gashia"),
+            InlineKeyboardButton(f"Canned Corn (₦{PRICES.get('canned_corn', 0)})", callback_data="mixing_canned_corn"),
         ],
         [InlineKeyboardButton("None", callback_data="mixing_none")],
         [InlineKeyboardButton("Done ✅", callback_data="mixing_done")],
@@ -1696,23 +1686,25 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     items = order.get("items", [])
     subtotal = sum(item.get("total_price", 0) for item in items)
 
-    pack_fee = PACK_FEE if order.get("food") in ["Indomie", "Custard"] else 0
+    pack_fee = PRICES.get("pack_fee", 0) if order.get("food") in ["Indomie", "Custard", "Spaghetti"] else 0
 
     service_charge = 0
-    if order.get("food") in ["Indomie", "Custard"]:
+    if order.get("food") == "Indomie":
         base_item_quantity = sum(item.get('quantity', 0) for item in items if item.get("type") == "base")
-        service_charge = base_item_quantity * 250
+        service_charge = base_item_quantity * PRICES.get("service_charge_indomie", 250)
+    elif order.get("food") == "Custard":
+        base_item_quantity = sum(item.get('quantity', 0) for item in items if item.get("type") == "base")
+        service_charge = base_item_quantity * PRICES.get("service_charge_custard", 250)
     elif order.get("food") in ["Cafe Order", "Shopping Mall"]:
         service_charge = (subtotal // 500) * 100
     elif order.get("food") == "Spaghetti":
-        # Clear any previous fixed costs to avoid duplication on "back" actions
         items = [item for item in items if item.get("type") != "fixed_cost"]
         if order.get("spaghetti_quantity") == "half":
-            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": 3000, "quantity": 1, "total_price": 3000})
-            service_charge = 1500
+            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_half"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_half")})
+            service_charge = PRICES.get("service_charge_spaghetti_half")
         else:  # Full portion
-            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": 6000, "quantity": 1, "total_price": 6000})
-            service_charge = 3000
+            items.append({"name": "Cost of Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_full"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_full")})
+            service_charge = PRICES.get("service_charge_spaghetti_full")
 
     total = subtotal + service_charge + pack_fee
     order["service_charge"] = service_charge
@@ -1720,6 +1712,9 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     summary = "<b>Here is your order summary:</b>\n\n"
     for item in items:
+        # Hide "Cost of Ingredients" from the initial summary
+        if item.get("type") == "fixed_cost":
+            continue
         name = item.get("name", "Unknown Item").replace('_', ' ').title()
         quantity = item.get("quantity", 0)
         summary += f"- {name} (x{quantity})\n"
@@ -1829,10 +1824,16 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
         else:
             bill += f"• {name} ({quantity} × ₦{unit_price}) = ₦{item_total}\n"
 
-    pack_fee = PACK_FEE if order.get("food") in ["Indomie", "Custard"] else 0
+    pack_fee = PRICES.get("pack_fee", 0) if order.get("food") in ["Indomie", "Custard", "Spaghetti"] else 0
     service_charge = order.get("service_charge", 0)
     total = order.get("total", 0)
     
+    # Explicitly add cost of ingredients for spaghetti in the bill
+    if order.get("food") == "Spaghetti":
+        cost_item = next((item for item in items if item.get("type") == "fixed_cost"), None)
+        if cost_item:
+            bill += f"Cost of Ingredients: ₦{cost_item.get('total_price', 0)}\n"
+
     if pack_fee > 0:
         bill += f"Pack Fee: ₦{pack_fee}\n"
     bill += f"Service Charge: ₦{service_charge}\n"
@@ -2398,7 +2399,7 @@ async def main() -> None:
             INDOMIE_CHICKEN_1500_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1500_quantity)],
             INDOMIE_CHICKEN_3000_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_3000_quantity)],
             INDOMIE_FRIED_FISH_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fried_fish_quantity)],
-            GET_GISHIRI_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gishiri_quantity)],
+            GET_GASHIA_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gashia_quantity)],
             GET_CANNED_CORN_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_canned_corn_quantity)],
             INDOMIE_WATER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_water_quantity)],
             INDOMIE_COKE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_coke_quantity)],
