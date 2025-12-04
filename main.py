@@ -64,6 +64,8 @@ PRICES = {
     "milk": 400,
 
     # Spaghetti items
+    "spaghetti_half": 1300,
+    "spaghetti_full": 2600,
     "gashia": 1200,
     "canned_corn": 2000,
     "cost_of_ingredients_half": 3000,
@@ -1635,7 +1637,8 @@ async def spaghetti_quantity(update: Update, context: CallbackContext) -> int:
     
     unit_price = 0
     if order.get("source") == "kitchen":
-        unit_price = 1300 if quantity_type == "half" else 2600
+        price_key = "spaghetti_half" if quantity_type == "half" else "spaghetti_full"
+        unit_price = PRICES.get(price_key, 0)
 
     item_name = f"Spaghetti ({'Half Portion' if quantity_type == 'half' else 'Full Portion'})"
     
@@ -1709,6 +1712,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     total = subtotal + service_charge + pack_fee
     order["service_charge"] = service_charge
     order["total"] = total
+    order["items"] = items  # Save the modified items list back to the order
 
     summary = "<b>Here is your order summary:</b>\n\n"
     for item in items:
@@ -1821,6 +1825,8 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
              bill += f"• {name} = ₦{item_total}\n"
         elif name.lower() == 'suya':
             bill += f"• {name} (Amount) = ₦{item_total}\n"
+        elif item.get("type") in ["cafe_item", "shopping_mall_item"]:
+            bill += f"• {name} (x{quantity}) = ₦{item_total}\n"
         else:
             bill += f"• {name} ({quantity} × ₦{unit_price}) = ₦{item_total}\n"
 
