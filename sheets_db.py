@@ -132,19 +132,19 @@ def update_worker_payout(worker_id, order_id, payout_amount):
     """Adds a payout record to a worker's profile and updates the total."""
     try:
         cell = workers_sheet.find(str(worker_id), in_column=1)
-
+        
         # Get current payout list (column 11)
         payouts_str = workers_sheet.cell(cell.row, 11).value
         payouts = json.loads(payouts_str) if payouts_str else []
-
+        
         # Add new payout record
         payouts.append({"order_id": order_id, "payout": payout_amount})
         workers_sheet.update_cell(cell.row, 11, json.dumps(payouts))
-
+        
         # Update total payout (column 12)
         total_payout = sum(p['payout'] for p in payouts)
         workers_sheet.update_cell(cell.row, 12, total_payout)
-
+        
     except (AttributeError, gspread.exceptions.CellNotFound):
         print(f"Error: Worker ID {worker_id} not found.")
     except json.JSONDecodeError:
