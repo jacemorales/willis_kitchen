@@ -43,7 +43,8 @@ PRICES = {
     "crayfish_spice": 200,
     "vegetables": 800,
     "suya": 1,  # Special case: price is the quantity
-    "egg": 400,
+    "boiled_egg": 400,
+    "fried_egg": 500,
     "sausage": 400,
     "sardine": 1900,
     "chicken_1000": 1000,
@@ -55,7 +56,8 @@ PRICES = {
     "water": 300,
     "soft_drink": 600,
     "malt": 800,
-    "1ltr_drink": 2500,
+    "1ltr_drink": 2000,
+    "willis_drink": 500,
     "ice": 250,
 
     # Custard items
@@ -236,7 +238,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_QUANTITY,
     INDOMIE_NOTES,
     INDOMIE_SARDINE_QUANTITY,
-    INDOMIE_EGG_QUANTITY,
+    INDOMIE_BOILED_EGG_QUANTITY,
+    INDOMIE_FRIED_EGG_QUANTITY,
     INDOMIE_SAUSAGE_QUANTITY,
     INDOMIE_CHICKEN_1000_QUANTITY,
     INDOMIE_CHICKEN_1500_QUANTITY,
@@ -262,7 +265,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     SPAGHETTI_QUANTITY,
     GET_GASHIA_QUANTITY,
     GET_CANNED_CORN_QUANTITY,
-) = range(58)
+    INDOMIE_WILLIS_DRINK_QUANTITY,
+) = range(60)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -1040,8 +1044,8 @@ async def indomie_mixings(update: Update, context: CallbackContext) -> int:
 
     if selection == "none":
         order["selected_mixings"] = []
-        # Keep spices if they are selected for indomie
-        order["items"] = [item for item in items if item.get("type") not in ["mixing"] and (is_spaghetti or item.get("type") == "spice")]
+        # Keep everything except mixings
+        order["items"] = [item for item in items if item.get("type") != "mixing"]
         return await ask_for_mixing_quantities(update, context)
 
     item_name = selection 
@@ -1172,7 +1176,10 @@ async def indomie_toppings(update: Update, context: CallbackContext) -> int:
 def indomie_toppings_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Egg (₦400)", callback_data="topping_egg"),
+            InlineKeyboardButton("Boiled Egg (₦400)", callback_data="topping_boiled_egg"),
+            InlineKeyboardButton("Fried Egg (₦500)", callback_data="topping_fried_egg"),
+        ],
+        [
             InlineKeyboardButton("Sausage (₦400)", callback_data="topping_sausage"),
         ],
         [
@@ -1196,8 +1203,10 @@ async def ask_for_topping_quantities(update: Update, context: CallbackContext) -
 
     if next_topping_to_ask:
         message_text, next_state = "", -1
-        if next_topping_to_ask == "egg":
-            message_text, next_state = "How many eggs would you like?", INDOMIE_EGG_QUANTITY
+        if next_topping_to_ask == "boiled_egg":
+            message_text, next_state = "How many boiled eggs would you like?", INDOMIE_BOILED_EGG_QUANTITY
+        elif next_topping_to_ask == "fried_egg":
+            message_text, next_state = "How many fried eggs would you like?", INDOMIE_FRIED_EGG_QUANTITY
         elif next_topping_to_ask == "sausage":
             message_text, next_state = "How many sausages would you like?", INDOMIE_SAUSAGE_QUANTITY
         elif next_topping_to_ask == "chicken_1000":
@@ -1236,9 +1245,12 @@ def beverage_keyboard():
         ],
         [
             InlineKeyboardButton("Malt (₦800)", callback_data="bev_malt"),
-            InlineKeyboardButton("1Ltr Drink (₦2500)", callback_data="bev_1ltr_drink"),
+            InlineKeyboardButton("1Ltr Drink (₦2000)", callback_data="bev_1ltr_drink"),
         ],
-        [InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")],
+        [
+            InlineKeyboardButton("Willis Drink (₦500)", callback_data="bev_willis_drink"),
+            InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")
+        ],
         [InlineKeyboardButton("None", callback_data="bev_none")],
         [InlineKeyboardButton("Done ✅", callback_data="bev_done")],
     ])
@@ -1260,6 +1272,8 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
             message_text, next_state = "How many malts would you like?", INDOMIE_MALT_QUANTITY
         elif next_beverage_to_ask == "1ltr_drink":
             message_text, next_state = "How many 1Ltr drinks would you like?", INDOMIE_JUICE_QUANTITY
+        elif next_beverage_to_ask == "willis_drink":
+            message_text, next_state = "How many Willis drinks would you like?", INDOMIE_WILLIS_DRINK_QUANTITY
         elif next_beverage_to_ask == "ice":
             message_text, next_state = "How many packs of ice would you like?", INDOMIE_ICE_QUANTITY
 
@@ -1371,8 +1385,16 @@ async def get_suya_amount(update: Update, context: CallbackContext) -> int:
     return await get_mixing_quantity(update, context, "suya", INDOMIE_SUYA_AMOUNT)
 
 
-async def get_egg_quantity(update: Update, context: CallbackContext) -> int:
-    return await get_topping_quantity(update, context, "egg", INDOMIE_EGG_QUANTITY)
+async def get_boiled_egg_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_topping_quantity(update, context, "boiled_egg", INDOMIE_BOILED_EGG_QUANTITY)
+
+
+async def get_fried_egg_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_topping_quantity(update, context, "fried_egg", INDOMIE_FRIED_EGG_QUANTITY)
+
+
+async def get_willis_drink_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_beverage_quantity(update, context, "willis_drink", INDOMIE_WILLIS_DRINK_QUANTITY)
 
 async def get_sausage_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "sausage", INDOMIE_SAUSAGE_QUANTITY)
@@ -1730,8 +1752,9 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     summary += "----------------------\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
-    summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app"
+    summary += "Transfer to:\n"
+    summary += "7078850843\n"
+    summary += "palmpay"
 
     keyboard = [
         [
@@ -2403,7 +2426,8 @@ async def main() -> None:
             INDOMIE_VEGETABLES_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_vegetables_quantity)],
             INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_suya_amount)],
             INDOMIE_SARDINE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sardine_quantity)],
-            INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_egg_quantity)],
+            INDOMIE_BOILED_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_boiled_egg_quantity)],
+            INDOMIE_FRIED_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fried_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sausage_quantity)],
             INDOMIE_CHICKEN_1000_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1000_quantity)],
             INDOMIE_CHICKEN_1500_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1500_quantity)],
@@ -2415,6 +2439,7 @@ async def main() -> None:
             INDOMIE_COKE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_coke_quantity)],
             INDOMIE_MALT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_malt_quantity)],
             INDOMIE_JUICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_juice_quantity)],
+            INDOMIE_WILLIS_DRINK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_quantity)],
             INDOMIE_ICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ice_quantity)],
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
             CUSTARD_SOURCE: [CallbackQueryHandler(custard_source, pattern="^custard_source_")],
