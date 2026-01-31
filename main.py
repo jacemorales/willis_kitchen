@@ -1,7 +1,7 @@
 import logging
 import json
-import json
 import os
+import html
 from datetime import datetime
 import random
 import asyncio
@@ -24,7 +24,7 @@ from sheets_db import (
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
     add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
-    add_or_update_user, get_workers_by_status, update_worker_status
+    add_or_update_user, get_workers_by_status, update_worker_status, update_worker_payout
 )
 from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL, FAQ_MESSAGE
@@ -37,13 +37,16 @@ PRICES = {
     "super_chicken": 500,
     "small_onion_chicken": 450,
     "super_onion_chicken": 600,
+    "small_orientals": 450,
+    "super_orientals": 600,
 
     # Mixings & Toppings
     "pepper_spice": 200,
     "crayfish_spice": 200,
     "vegetables": 800,
     "suya": 1,  # Special case: price is the quantity
-    "egg": 400,
+    "boiled_egg": 400,
+    "fried_egg": 500,
     "sausage": 400,
     "sardine": 1900,
     "chicken_1000": 1000,
@@ -55,7 +58,8 @@ PRICES = {
     "water": 300,
     "soft_drink": 600,
     "malt": 800,
-    "1ltr_drink": 2500,
+    "1ltr_drink": 2000,
+    "willis_drink": 500,
     "ice": 250,
 
     # Custard items
@@ -122,7 +126,8 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         delivery_info = json.loads(order.get('delivery_info', '{}'))
     except json.JSONDecodeError:
         delivery_info = {}
-    summary += f"<b>Room Number:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n\n"
+    summary += f"<b>Room Number:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n"
+    summary += f"<b>Delivery Time:</b> {delivery_info.get('delivery_time', 'N/A')}\n\n"
     
     summary += "<b>Items Ordered:</b>\n"
     try:
@@ -236,7 +241,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_QUANTITY,
     INDOMIE_NOTES,
     INDOMIE_SARDINE_QUANTITY,
-    INDOMIE_EGG_QUANTITY,
+    INDOMIE_BOILED_EGG_QUANTITY,
+    INDOMIE_FRIED_EGG_QUANTITY,
     INDOMIE_SAUSAGE_QUANTITY,
     INDOMIE_CHICKEN_1000_QUANTITY,
     INDOMIE_CHICKEN_1500_QUANTITY,
@@ -262,7 +268,9 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     SPAGHETTI_QUANTITY,
     GET_GASHIA_QUANTITY,
     GET_CANNED_CORN_QUANTITY,
-) = range(58)
+    INDOMIE_WILLIS_DRINK_QUANTITY,
+    FOLLOW_UP_MESSAGE,
+) = range(61)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -273,6 +281,7 @@ async def start(update: Update, context: CallbackContext) -> int:
     keyboard = [
         [InlineKeyboardButton("🛒 Place an Order", callback_data="place_order")],
         [InlineKeyboardButton("👀 View My Orders", callback_data="view_orders")],
+        [InlineKeyboardButton("📝 Give Feedback", callback_data="customer_feedback")],
         [InlineKeyboardButton("🤔 FAQ's", callback_data="faq")],
         [InlineKeyboardButton("🚀 Share Bot", callback_data="share_bot")],
     ]
@@ -295,6 +304,7 @@ async def place_order_menu(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
         [InlineKeyboardButton("🛍️ Shopping Mall", callback_data="shopping_mall_menu")],
+        [InlineKeyboardButton("📝 Give Feedback", callback_data="customer_feedback")],
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -788,6 +798,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
             user_keyboard = [
                 [InlineKeyboardButton("✅ Order Delivered", callback_data=f"user_delivered_{order_id}")],
                 [InlineKeyboardButton("❌ Not Delivered", callback_data=f"user_not_delivered_{order_id}")],
+                [InlineKeyboardButton("📞 Order Follow Up", callback_data=f"order_follow_up_{order_id}")],
             ]
             user_reply_markup = InlineKeyboardMarkup(user_keyboard)
             await context.bot.send_message(
@@ -893,6 +904,41 @@ async def save_delivery_issue(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 
+async def order_follow_up_start(update: Update, context: CallbackContext) -> int:
+    """Starts the order follow up conversation."""
+    query = update.callback_query
+    await query.answer()
+    order_id = query.data.split("_")[-1]
+    context.user_data["follow_up_order_id"] = order_id
+    await query.message.reply_text("Please type the message you want to send to the person handling your order.")
+    return FOLLOW_UP_MESSAGE
+
+
+async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
+    """Sends the follow up message to the worker."""
+    message_text = update.message.text
+    order_id = context.user_data.get("follow_up_order_id")
+    order = get_order_by_id(int(order_id))
+
+    if order and order.get('taken_by'):
+        worker_id = int(order.get('taken_by'))
+        user = update.effective_user
+        try:
+            await context.bot.send_message(
+                chat_id=worker_id,
+                text=f"💬 <b>Follow-up from Customer for Order #{order_id}</b> (@{user.username}):\n\n{message_text}",
+                parse_mode='HTML'
+            )
+            await update.message.reply_text("Your message has been sent to the person handling your order.")
+        except Exception as e:
+            logger.error(f"Failed to send follow-up to worker {worker_id}: {e}")
+            await update.message.reply_text("Failed to send message. Please try again later.")
+    else:
+        await update.message.reply_text("Could not find the person handling your order.")
+
+    return ConversationHandler.END
+
+
 async def indomie_start(update: Update, context: CallbackContext) -> int:
     """Asks if the user is providing their own Indomie."""
     query = update.callback_query
@@ -924,11 +970,18 @@ async def indomie_flavor(update: Update, context: CallbackContext) -> int:
             [InlineKeyboardButton("Small (₦400)", callback_data="size_small_400")],
             [InlineKeyboardButton("Super Pack (₦500)", callback_data="size_super_500")],
         ]
-    else:  # Onion and Chicken
+    elif flavor == "onion_chicken":
         keyboard = [
             [InlineKeyboardButton("Small (₦450)", callback_data="size_small_450")],
             [InlineKeyboardButton("Super Pack (₦600)", callback_data="size_super_600")],
         ]
+    elif flavor == "orientals":
+        keyboard = [
+            [InlineKeyboardButton("Small (₦450)", callback_data="size_small_450")],
+            [InlineKeyboardButton("Super Pack (₦600)", callback_data="size_super_600")],
+        ]
+    else:
+        keyboard = []
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_or_edit_message(update, "Please choose a size:", reply_markup=reply_markup)
     return INDOMIE_SIZE
@@ -948,6 +1001,7 @@ async def indomie_source(update: Update, context: CallbackContext) -> int:
         keyboard = [
             [InlineKeyboardButton("Chicken Flavour", callback_data="flavor_chicken")],
             [InlineKeyboardButton("Onion and Chicken", callback_data="flavor_onion_chicken")],
+            [InlineKeyboardButton("Orientals", callback_data="flavor_orientals")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await send_or_edit_message(update, "Please choose a flavor:", reply_markup=reply_markup)
@@ -1040,8 +1094,8 @@ async def indomie_mixings(update: Update, context: CallbackContext) -> int:
 
     if selection == "none":
         order["selected_mixings"] = []
-        # Keep spices if they are selected for indomie
-        order["items"] = [item for item in items if item.get("type") not in ["mixing"] and (is_spaghetti or item.get("type") == "spice")]
+        # Keep everything except mixings
+        order["items"] = [item for item in items if item.get("type") != "mixing"]
         return await ask_for_mixing_quantities(update, context)
 
     item_name = selection 
@@ -1172,7 +1226,10 @@ async def indomie_toppings(update: Update, context: CallbackContext) -> int:
 def indomie_toppings_keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Egg (₦400)", callback_data="topping_egg"),
+            InlineKeyboardButton("Boiled Egg (₦400)", callback_data="topping_boiled_egg"),
+            InlineKeyboardButton("Fried Egg (₦500)", callback_data="topping_fried_egg"),
+        ],
+        [
             InlineKeyboardButton("Sausage (₦400)", callback_data="topping_sausage"),
         ],
         [
@@ -1196,8 +1253,10 @@ async def ask_for_topping_quantities(update: Update, context: CallbackContext) -
 
     if next_topping_to_ask:
         message_text, next_state = "", -1
-        if next_topping_to_ask == "egg":
-            message_text, next_state = "How many eggs would you like?", INDOMIE_EGG_QUANTITY
+        if next_topping_to_ask == "boiled_egg":
+            message_text, next_state = "How many boiled eggs would you like?", INDOMIE_BOILED_EGG_QUANTITY
+        elif next_topping_to_ask == "fried_egg":
+            message_text, next_state = "How many fried eggs would you like?", INDOMIE_FRIED_EGG_QUANTITY
         elif next_topping_to_ask == "sausage":
             message_text, next_state = "How many sausages would you like?", INDOMIE_SAUSAGE_QUANTITY
         elif next_topping_to_ask == "chicken_1000":
@@ -1236,9 +1295,12 @@ def beverage_keyboard():
         ],
         [
             InlineKeyboardButton("Malt (₦800)", callback_data="bev_malt"),
-            InlineKeyboardButton("1Ltr Drink (₦2500)", callback_data="bev_1ltr_drink"),
+            InlineKeyboardButton("1Ltr Drink (₦2000)", callback_data="bev_1ltr_drink"),
         ],
-        [InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")],
+        [
+            InlineKeyboardButton("Willis Drink (₦500)", callback_data="bev_willis_drink"),
+            InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")
+        ],
         [InlineKeyboardButton("None", callback_data="bev_none")],
         [InlineKeyboardButton("Done ✅", callback_data="bev_done")],
     ])
@@ -1260,6 +1322,8 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
             message_text, next_state = "How many malts would you like?", INDOMIE_MALT_QUANTITY
         elif next_beverage_to_ask == "1ltr_drink":
             message_text, next_state = "How many 1Ltr drinks would you like?", INDOMIE_JUICE_QUANTITY
+        elif next_beverage_to_ask == "willis_drink":
+            message_text, next_state = "How many Willis drinks would you like?", INDOMIE_WILLIS_DRINK_QUANTITY
         elif next_beverage_to_ask == "ice":
             message_text, next_state = "How many packs of ice would you like?", INDOMIE_ICE_QUANTITY
 
@@ -1371,8 +1435,16 @@ async def get_suya_amount(update: Update, context: CallbackContext) -> int:
     return await get_mixing_quantity(update, context, "suya", INDOMIE_SUYA_AMOUNT)
 
 
-async def get_egg_quantity(update: Update, context: CallbackContext) -> int:
-    return await get_topping_quantity(update, context, "egg", INDOMIE_EGG_QUANTITY)
+async def get_boiled_egg_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_topping_quantity(update, context, "boiled_egg", INDOMIE_BOILED_EGG_QUANTITY)
+
+
+async def get_fried_egg_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_topping_quantity(update, context, "fried_egg", INDOMIE_FRIED_EGG_QUANTITY)
+
+
+async def get_willis_drink_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_beverage_quantity(update, context, "willis_drink", INDOMIE_WILLIS_DRINK_QUANTITY)
 
 async def get_sausage_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "sausage", INDOMIE_SAUSAGE_QUANTITY)
@@ -1730,8 +1802,9 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
 
     summary += "----------------------\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
-    summary += "Pay Online:\n"
-    summary += "https://pay-naira.netlify.app"
+    summary += "Transfer to:\n"
+    summary += "7078850843\n"
+    summary += "palmpay"
 
     keyboard = [
         [
@@ -2243,26 +2316,82 @@ async def view_pending_applications_admin(update: Update, context: CallbackConte
 
 
 async def customer_feedback_start(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("We value your feedback! Please type a short review of your experience with the bot.")
+    """Starts the customer feedback conversation."""
+    message_text = "We value your feedback! Please type a short review of your experience with the bot."
+    if update.callback_query:
+        await update.callback_query.answer()
+        await send_or_edit_message(update, message_text)
+    else:
+        await update.message.reply_text(message_text)
     return CUSTOMER_FEEDBACK
 
 async def customer_feedback_save(update: Update, context: CallbackContext) -> int:
     user = update.effective_user
-    add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=update.message.text)
+    feedback_text = update.message.text
+    add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=feedback_text)
+
+    # Notify admin
+    try:
+        admin_msg = f"🆕 <b>New Customer Feedback</b>\n\n"
+        admin_msg += f"👤 <b>{html.escape(user.full_name)}</b> (@{html.escape(user.username) if user.username else 'N/A'})\n"
+        admin_msg += f"💬 {html.escape(feedback_text)}"
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Failed to notify admin of feedback: {e}")
+
     await update.message.reply_text("Thank you for your feedback! It has been recorded.")
     return ConversationHandler.END
 
 
 async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
+    """Displays customer feedback with pagination for the admin."""
+    query = update.callback_query
+    await query.answer()
+
+    # Extract page from callback_data (e.g., admin_feedback_page_1)
+    page = 1
+    if query.data.startswith("admin_feedback_page_"):
+        try:
+            page = int(query.data.split("_")[-1])
+        except (ValueError, IndexError):
+            page = 1
+
     feedback_data = get_all_feedback()
     if not feedback_data:
-        await send_or_edit_message(update, "No customer feedback yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
+        await send_or_edit_message(update, "No customer feedback yet.",
+                                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
-    message = "📝 Customer Feedbacks:\n\n" + "\n\n".join([
-        f"👤 <b>{f.get('name')}</b> (@{f.get('username')}) on {f.get('timestamp')}:\n   - \"{f.get('feedback_text')}\""
-        for f in feedback_data
-    ])
-    await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]), parse_mode='HTML')
+
+    # Sort newest first
+    feedback_data.reverse()
+
+    PER_PAGE = 5
+    total_pages = (len(feedback_data) + PER_PAGE - 1) // PER_PAGE
+    page = max(1, min(page, total_pages))
+    start_idx = (page - 1) * PER_PAGE
+    end_idx = start_idx + PER_PAGE
+    current_page_data = feedback_data[start_idx:end_idx]
+
+    message = f"📝 <b>Customer Feedbacks (Page {page}/{total_pages}):</b>\n\n"
+    for f in current_page_data:
+        name = html.escape(str(f.get('name', 'N/A')))
+        username = html.escape(str(f.get('username', 'N/A')))
+        timestamp = html.escape(str(f.get('timestamp', 'N/A')))
+        text = html.escape(str(f.get('feedback_text', 'N/A')))
+        message += f"👤 <b>{name}</b> (@{username}) on {timestamp}:\n   - \"{text}\"\n\n"
+
+    keyboard = []
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"admin_feedback_page_{page-1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_feedback_page_{page+1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")])
+
+    await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     return ADMIN_MENU
 
 
@@ -2343,7 +2472,7 @@ async def main() -> None:
                 CallbackQueryHandler(admin_orders_menu, pattern="^admin_orders$"),
                 CallbackQueryHandler(admin_workers_menu, pattern="^admin_workers$"),
                 CallbackQueryHandler(admin_payments_menu, pattern="^admin_payments$"),
-                CallbackQueryHandler(view_feedback_admin, pattern="^admin_feedback$"),
+                CallbackQueryHandler(view_feedback_admin, pattern=r"^admin_feedback(_page_\d+)?$"),
                 CallbackQueryHandler(admin_main_menu_callback, pattern="^admin_main_menu$"),
                 CallbackQueryHandler(view_active_orders_admin, pattern="^view_active_orders$"),
                 CallbackQueryHandler(view_taken_orders_admin, pattern="^view_taken_orders_admin$"),
@@ -2372,14 +2501,20 @@ async def main() -> None:
     )
     
     main_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start), CallbackQueryHandler(start, pattern="^main_menu$")],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(start, pattern="^main_menu$"),
+            CommandHandler("customer_feedback", customer_feedback_start),
+        ],
         states={
             MAIN_MENU: [
                 CallbackQueryHandler(place_order_menu, pattern="^place_order$"),
                 CallbackQueryHandler(view_orders, pattern=r"^view_orders(_page_\d+)?$"),
+                CallbackQueryHandler(customer_feedback_start, pattern="^customer_feedback$"),
                 CallbackQueryHandler(share_command, pattern="^share_bot$"),
                 CallbackQueryHandler(faq_handler, pattern="^faq$"),
             ],
+            CUSTOMER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_feedback_save)],
             ORDER_MENU: [
                 CallbackQueryHandler(kitchen_menu, pattern="^kitchen_menu$"),
                 CallbackQueryHandler(cafe_menu, pattern="^cafe_menu$"),
@@ -2403,7 +2538,8 @@ async def main() -> None:
             INDOMIE_VEGETABLES_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_vegetables_quantity)],
             INDOMIE_SUYA_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_suya_amount)],
             INDOMIE_SARDINE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sardine_quantity)],
-            INDOMIE_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_egg_quantity)],
+            INDOMIE_BOILED_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_boiled_egg_quantity)],
+            INDOMIE_FRIED_EGG_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fried_egg_quantity)],
             INDOMIE_SAUSAGE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_sausage_quantity)],
             INDOMIE_CHICKEN_1000_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1000_quantity)],
             INDOMIE_CHICKEN_1500_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_1500_quantity)],
@@ -2415,6 +2551,7 @@ async def main() -> None:
             INDOMIE_COKE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_coke_quantity)],
             INDOMIE_MALT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_malt_quantity)],
             INDOMIE_JUICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_juice_quantity)],
+            INDOMIE_WILLIS_DRINK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_quantity)],
             INDOMIE_ICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ice_quantity)],
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
             CUSTARD_SOURCE: [CallbackQueryHandler(custard_source, pattern="^custard_source_")],
@@ -2435,13 +2572,10 @@ async def main() -> None:
             GET_DELIVERY_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_delivery_time)],
             ASK_BEVERAGE: [CallbackQueryHandler(handle_beverage_selection, pattern="^bev_")],
         },
-        fallbacks=[CommandHandler("start", start)],
-    )
-
-    feedback_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("customer_feedback", customer_feedback_start)],
-        states={CUSTOMER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_feedback_save)]},
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("customer_feedback", customer_feedback_start),
+        ],
     )
 
     delivery_issue_conv_handler = ConversationHandler(
@@ -2450,10 +2584,16 @@ async def main() -> None:
         fallbacks=[CommandHandler("start", start)],
     )
 
+    follow_up_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(order_follow_up_start, pattern="^order_follow_up_")],
+        states={FOLLOW_UP_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_follow_up_send)]},
+        fallbacks=[CommandHandler("start", start)],
+    )
+
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
-    application.add_handler(feedback_conv_handler)
     application.add_handler(delivery_issue_conv_handler)
+    application.add_handler(follow_up_conv_handler)
     application.add_handler(main_conv_handler)
     
     # Top-level handlers

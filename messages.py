@@ -58,7 +58,7 @@ We are open from 9 AM to 9 PM, every day of the week.
 Absolutely! You can add or remove ingredients from the menu options to create your perfect meal. Just use the 'notes' section for any special requests.
 
 - What payment methods do you accept?
-We currently accept online payments through the provided link. You will be asked to upload a screenshot of your payment to confirm the order.
+We currently accept payments via bank transfer. You will be asked to upload a screenshot of your payment to confirm the order.
 
 - How can I track my order?
 You will receive a notification once your order is accepted by a worker. You can then track the status of your order from the "My Orders" section.
