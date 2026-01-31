@@ -306,7 +306,6 @@ async def place_order_menu(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
         [InlineKeyboardButton("🛍️ Shopping Mall", callback_data="shopping_mall_menu")],
-        [InlineKeyboardButton("📝 Give Feedback", callback_data="customer_feedback")],
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -945,7 +944,7 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
     message_text = update.message.text
     order_id = context.user_data.get("follow_up_order_id")
     order = get_order_by_id(int(order_id))
-
+    
     if order and order.get('taken_by'):
         worker_id = int(order.get('taken_by'))
         user = update.effective_user
@@ -961,7 +960,7 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("Failed to send message. Please try again later.")
     else:
         await update.message.reply_text("Could not find the person handling your order.")
-
+    
     return ConversationHandler.END
 
 
@@ -980,7 +979,7 @@ async def worker_chat_send(update: Update, context: CallbackContext) -> int:
     message_text = update.message.text
     order_id = context.user_data.get("worker_chat_order_id")
     order = get_order_by_id(int(order_id))
-
+    
     if order and order.get('user_id'):
         customer_id = int(order.get('user_id'))
         worker = update.effective_user
@@ -996,7 +995,7 @@ async def worker_chat_send(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("Failed to send message. The customer might have blocked the bot.")
     else:
         await update.message.reply_text("Could not find the customer for this order.")
-
+    
     return ConversationHandler.END
 
 
@@ -2396,7 +2395,7 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
     user = update.effective_user
     feedback_text = update.message.text
     add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=feedback_text)
-
+    
     # Notify admin
     try:
         admin_msg = f"🆕 <b>New Customer Feedback</b>\n\n"
@@ -2414,7 +2413,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
     """Displays customer feedback with pagination for the admin."""
     query = update.callback_query
     await query.answer()
-
+    
     # Extract page from callback_data (e.g., admin_feedback_page_1)
     page = 1
     if query.data.startswith("admin_feedback_page_"):
@@ -2425,7 +2424,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
 
     feedback_data = get_all_feedback()
     if not feedback_data:
-        await send_or_edit_message(update, "No customer feedback yet.",
+        await send_or_edit_message(update, "No customer feedback yet.", 
                                  reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
 
@@ -2455,9 +2454,9 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_feedback_page_{page+1}"))
     if nav_row:
         keyboard.append(nav_row)
-
+    
     keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")])
-
+    
     await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     return ADMIN_MENU
 
@@ -2569,7 +2568,7 @@ async def main() -> None:
     
     main_conv_handler = ConversationHandler(
         entry_points=[
-            CommandHandler("start", start),
+            CommandHandler("start", start), 
             CallbackQueryHandler(start, pattern="^main_menu$"),
             CommandHandler("customer_feedback", customer_feedback_start),
             CallbackQueryHandler(place_order_menu, pattern="^place_order$"),
