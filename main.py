@@ -1,7 +1,7 @@
 import logging
 import json
-import json
 import os
+import html
 from datetime import datetime
 import random
 import asyncio
@@ -281,6 +281,7 @@ async def start(update: Update, context: CallbackContext) -> int:
     keyboard = [
         [InlineKeyboardButton("🛒 Place an Order", callback_data="place_order")],
         [InlineKeyboardButton("👀 View My Orders", callback_data="view_orders")],
+        [InlineKeyboardButton("📝 Give Feedback", callback_data="customer_feedback")],
         [InlineKeyboardButton("🤔 FAQ's", callback_data="faq")],
         [InlineKeyboardButton("🚀 Share Bot", callback_data="share_bot")],
     ]
@@ -303,6 +304,7 @@ async def place_order_menu(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("🧑‍🍳 From Our Kitchen", callback_data="kitchen_menu")],
         [InlineKeyboardButton("☕ From Café", callback_data="cafe_menu")],
         [InlineKeyboardButton("🛍️ Shopping Mall", callback_data="shopping_mall_menu")],
+        [InlineKeyboardButton("📝 Give Feedback", callback_data="customer_feedback")],
         [InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2314,7 +2316,13 @@ async def view_pending_applications_admin(update: Update, context: CallbackConte
 
 
 async def customer_feedback_start(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("We value your feedback! Please type a short review of your experience with the bot.")
+    """Starts the customer feedback conversation."""
+    message_text = "We value your feedback! Please type a short review of your experience with the bot."
+    if update.callback_query:
+        await update.callback_query.answer()
+        await send_or_edit_message(update, message_text)
+    else:
+        await update.message.reply_text(message_text)
     return CUSTOMER_FEEDBACK
 
 async def customer_feedback_save(update: Update, context: CallbackContext) -> int:
@@ -2325,8 +2333,8 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
     # Notify admin
     try:
         admin_msg = f"🆕 <b>New Customer Feedback</b>\n\n"
-        admin_msg += f"👤 <b>{user.full_name}</b> (@{user.username})\n"
-        admin_msg += f"💬 {feedback_text}"
+        admin_msg += f"👤 <b>{html.escape(user.full_name)}</b> (@{html.escape(user.username) if user.username else 'N/A'})\n"
+        admin_msg += f"💬 {html.escape(feedback_text)}"
         await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Failed to notify admin of feedback: {e}")
@@ -2336,15 +2344,54 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
 
 
 async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
+    """Displays customer feedback with pagination for the admin."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract page from callback_data (e.g., admin_feedback_page_1)
+    page = 1
+    if query.data.startswith("admin_feedback_page_"):
+        try:
+            page = int(query.data.split("_")[-1])
+        except (ValueError, IndexError):
+            page = 1
+
     feedback_data = get_all_feedback()
     if not feedback_data:
-        await send_or_edit_message(update, "No customer feedback yet.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
+        await send_or_edit_message(update, "No customer feedback yet.", 
+                                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
-    message = "📝 Customer Feedbacks:\n\n" + "\n\n".join([
-        f"👤 <b>{f.get('name')}</b> (@{f.get('username')}) on {f.get('timestamp')}:\n   - \"{f.get('feedback_text')}\""
-        for f in feedback_data
-    ])
-    await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]), parse_mode='HTML')
+
+    # Sort newest first
+    feedback_data.reverse()
+
+    PER_PAGE = 5
+    total_pages = (len(feedback_data) + PER_PAGE - 1) // PER_PAGE
+    page = max(1, min(page, total_pages))
+    start_idx = (page - 1) * PER_PAGE
+    end_idx = start_idx + PER_PAGE
+    current_page_data = feedback_data[start_idx:end_idx]
+
+    message = f"📝 <b>Customer Feedbacks (Page {page}/{total_pages}):</b>\n\n"
+    for f in current_page_data:
+        name = html.escape(str(f.get('name', 'N/A')))
+        username = html.escape(str(f.get('username', 'N/A')))
+        timestamp = html.escape(str(f.get('timestamp', 'N/A')))
+        text = html.escape(str(f.get('feedback_text', 'N/A')))
+        message += f"👤 <b>{name}</b> (@{username}) on {timestamp}:\n   - \"{text}\"\n\n"
+
+    keyboard = []
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"admin_feedback_page_{page-1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_feedback_page_{page+1}"))
+    if nav_row:
+        keyboard.append(nav_row)
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")])
+    
+    await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     return ADMIN_MENU
 
 
@@ -2425,7 +2472,7 @@ async def main() -> None:
                 CallbackQueryHandler(admin_orders_menu, pattern="^admin_orders$"),
                 CallbackQueryHandler(admin_workers_menu, pattern="^admin_workers$"),
                 CallbackQueryHandler(admin_payments_menu, pattern="^admin_payments$"),
-                CallbackQueryHandler(view_feedback_admin, pattern="^admin_feedback$"),
+                CallbackQueryHandler(view_feedback_admin, pattern=r"^admin_feedback(_page_\d+)?$"),
                 CallbackQueryHandler(admin_main_menu_callback, pattern="^admin_main_menu$"),
                 CallbackQueryHandler(view_active_orders_admin, pattern="^view_active_orders$"),
                 CallbackQueryHandler(view_taken_orders_admin, pattern="^view_taken_orders_admin$"),
@@ -2454,14 +2501,20 @@ async def main() -> None:
     )
     
     main_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start), CallbackQueryHandler(start, pattern="^main_menu$")],
+        entry_points=[
+            CommandHandler("start", start), 
+            CallbackQueryHandler(start, pattern="^main_menu$"),
+            CommandHandler("customer_feedback", customer_feedback_start),
+        ],
         states={
             MAIN_MENU: [
                 CallbackQueryHandler(place_order_menu, pattern="^place_order$"),
                 CallbackQueryHandler(view_orders, pattern=r"^view_orders(_page_\d+)?$"),
+                CallbackQueryHandler(customer_feedback_start, pattern="^customer_feedback$"),
                 CallbackQueryHandler(share_command, pattern="^share_bot$"),
                 CallbackQueryHandler(faq_handler, pattern="^faq$"),
             ],
+            CUSTOMER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_feedback_save)],
             ORDER_MENU: [
                 CallbackQueryHandler(kitchen_menu, pattern="^kitchen_menu$"),
                 CallbackQueryHandler(cafe_menu, pattern="^cafe_menu$"),
@@ -2519,13 +2572,10 @@ async def main() -> None:
             GET_DELIVERY_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_delivery_time)],
             ASK_BEVERAGE: [CallbackQueryHandler(handle_beverage_selection, pattern="^bev_")],
         },
-        fallbacks=[CommandHandler("start", start)],
-    )
-
-    feedback_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("customer_feedback", customer_feedback_start)],
-        states={CUSTOMER_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, customer_feedback_save)]},
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("customer_feedback", customer_feedback_start),
+        ],
     )
 
     delivery_issue_conv_handler = ConversationHandler(
@@ -2542,7 +2592,6 @@ async def main() -> None:
 
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
-    application.add_handler(feedback_conv_handler)
     application.add_handler(delivery_issue_conv_handler)
     application.add_handler(follow_up_conv_handler)
     application.add_handler(main_conv_handler)
