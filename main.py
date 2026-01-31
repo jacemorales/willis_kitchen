@@ -24,7 +24,7 @@ from sheets_db import (
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
     add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
-    add_or_update_user, get_workers_by_status, update_worker_status
+    add_or_update_user, get_workers_by_status, update_worker_status, update_worker_payout
 )
 from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL, FAQ_MESSAGE
@@ -37,6 +37,8 @@ PRICES = {
     "super_chicken": 500,
     "small_onion_chicken": 450,
     "super_onion_chicken": 600,
+    "small_orientals": 450,
+    "super_orientals": 600,
 
     # Mixings & Toppings
     "pepper_spice": 200,
@@ -124,7 +126,8 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         delivery_info = json.loads(order.get('delivery_info', '{}'))
     except json.JSONDecodeError:
         delivery_info = {}
-    summary += f"<b>Room Number:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n\n"
+    summary += f"<b>Room Number:</b> {delivery_info.get('hall_and_room_number', 'N/A')}\n"
+    summary += f"<b>Delivery Time:</b> {delivery_info.get('delivery_time', 'N/A')}\n\n"
     
     summary += "<b>Items Ordered:</b>\n"
     try:
@@ -266,7 +269,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_GASHIA_QUANTITY,
     GET_CANNED_CORN_QUANTITY,
     INDOMIE_WILLIS_DRINK_QUANTITY,
-) = range(60)
+    FOLLOW_UP_MESSAGE,
+) = range(61)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -792,6 +796,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
             user_keyboard = [
                 [InlineKeyboardButton("✅ Order Delivered", callback_data=f"user_delivered_{order_id}")],
                 [InlineKeyboardButton("❌ Not Delivered", callback_data=f"user_not_delivered_{order_id}")],
+                [InlineKeyboardButton("📞 Order Follow Up", callback_data=f"order_follow_up_{order_id}")],
             ]
             user_reply_markup = InlineKeyboardMarkup(user_keyboard)
             await context.bot.send_message(
@@ -897,6 +902,41 @@ async def save_delivery_issue(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 
+async def order_follow_up_start(update: Update, context: CallbackContext) -> int:
+    """Starts the order follow up conversation."""
+    query = update.callback_query
+    await query.answer()
+    order_id = query.data.split("_")[-1]
+    context.user_data["follow_up_order_id"] = order_id
+    await query.message.reply_text("Please type the message you want to send to the person handling your order.")
+    return FOLLOW_UP_MESSAGE
+
+
+async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
+    """Sends the follow up message to the worker."""
+    message_text = update.message.text
+    order_id = context.user_data.get("follow_up_order_id")
+    order = get_order_by_id(int(order_id))
+    
+    if order and order.get('taken_by'):
+        worker_id = int(order.get('taken_by'))
+        user = update.effective_user
+        try:
+            await context.bot.send_message(
+                chat_id=worker_id,
+                text=f"💬 <b>Follow-up from Customer for Order #{order_id}</b> (@{user.username}):\n\n{message_text}",
+                parse_mode='HTML'
+            )
+            await update.message.reply_text("Your message has been sent to the person handling your order.")
+        except Exception as e:
+            logger.error(f"Failed to send follow-up to worker {worker_id}: {e}")
+            await update.message.reply_text("Failed to send message. Please try again later.")
+    else:
+        await update.message.reply_text("Could not find the person handling your order.")
+    
+    return ConversationHandler.END
+
+
 async def indomie_start(update: Update, context: CallbackContext) -> int:
     """Asks if the user is providing their own Indomie."""
     query = update.callback_query
@@ -928,11 +968,18 @@ async def indomie_flavor(update: Update, context: CallbackContext) -> int:
             [InlineKeyboardButton("Small (₦400)", callback_data="size_small_400")],
             [InlineKeyboardButton("Super Pack (₦500)", callback_data="size_super_500")],
         ]
-    else:  # Onion and Chicken
+    elif flavor == "onion_chicken":
         keyboard = [
             [InlineKeyboardButton("Small (₦450)", callback_data="size_small_450")],
             [InlineKeyboardButton("Super Pack (₦600)", callback_data="size_super_600")],
         ]
+    elif flavor == "orientals":
+        keyboard = [
+            [InlineKeyboardButton("Small (₦450)", callback_data="size_small_450")],
+            [InlineKeyboardButton("Super Pack (₦600)", callback_data="size_super_600")],
+        ]
+    else:
+        keyboard = []
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_or_edit_message(update, "Please choose a size:", reply_markup=reply_markup)
     return INDOMIE_SIZE
@@ -952,6 +999,7 @@ async def indomie_source(update: Update, context: CallbackContext) -> int:
         keyboard = [
             [InlineKeyboardButton("Chicken Flavour", callback_data="flavor_chicken")],
             [InlineKeyboardButton("Onion and Chicken", callback_data="flavor_onion_chicken")],
+            [InlineKeyboardButton("Orientals", callback_data="flavor_orientals")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await send_or_edit_message(update, "Please choose a flavor:", reply_markup=reply_markup)
@@ -2271,7 +2319,18 @@ async def customer_feedback_start(update: Update, context: CallbackContext) -> i
 
 async def customer_feedback_save(update: Update, context: CallbackContext) -> int:
     user = update.effective_user
-    add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=update.message.text)
+    feedback_text = update.message.text
+    add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=feedback_text)
+    
+    # Notify admin
+    try:
+        admin_msg = f"🆕 <b>New Customer Feedback</b>\n\n"
+        admin_msg += f"👤 <b>{user.full_name}</b> (@{user.username})\n"
+        admin_msg += f"💬 {feedback_text}"
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Failed to notify admin of feedback: {e}")
+
     await update.message.reply_text("Thank you for your feedback! It has been recorded.")
     return ConversationHandler.END
 
@@ -2475,10 +2534,17 @@ async def main() -> None:
         fallbacks=[CommandHandler("start", start)],
     )
 
+    follow_up_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(order_follow_up_start, pattern="^order_follow_up_")],
+        states={FOLLOW_UP_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_follow_up_send)]},
+        fallbacks=[CommandHandler("start", start)],
+    )
+
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
     application.add_handler(feedback_conv_handler)
     application.add_handler(delivery_issue_conv_handler)
+    application.add_handler(follow_up_conv_handler)
     application.add_handler(main_conv_handler)
     
     # Top-level handlers
