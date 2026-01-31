@@ -136,7 +136,8 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         items = []
     for item in items:
         item_name = item.get('name', 'N/A').replace('_', ' ').title()
-        summary += f"- {item_name} (x{item.get('quantity', 0)})\n"
+        item_price = item.get('total_price', 0)
+        summary += f"- {item_name} (x{item.get('quantity', 0)}) = ₦{item_price}\n"
         
     if order.get('notes'):
         summary += f"\n<b>Additional Notes:</b> {order.get('notes')}\n"
@@ -150,7 +151,7 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
     if order.get('food_type') == 'Cafe Order':
         if for_admin:
             summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
-        summary += f"<b>Worker Payout:</b> ₦{worker_payout}\n"
+        summary += f"<b>Payout:</b> ₦{worker_payout}\n"
     elif for_admin: # For Kitchen Orders, only admin sees service charge
         summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
 
@@ -270,7 +271,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     GET_CANNED_CORN_QUANTITY,
     INDOMIE_WILLIS_DRINK_QUANTITY,
     FOLLOW_UP_MESSAGE,
-) = range(61)
+    WORKER_CHAT_MESSAGE,
+) = range(62)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -801,6 +803,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
     worker_keyboard = [
         [InlineKeyboardButton("✅ Order Delivered", callback_data=f"worker_delivered_{order_id}")],
         [InlineKeyboardButton("❌ Not Delivered", callback_data=f"worker_not_delivered_{order_id}")],
+        [InlineKeyboardButton("💬 Chat with Customer", callback_data=f"worker_chat_{order_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(worker_keyboard)
     await context.bot.send_message(
@@ -949,7 +952,7 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
         try:
             await context.bot.send_message(
                 chat_id=worker_id,
-                text=f"💬 <b>Follow-up from Customer for Order #{order_id}</b> (@{user.username}):\n\n{message_text}",
+                text=f"💬 <b>Follow-up from Customer for Order #{order_id}</b> (@{user.username}):\n\n{html.escape(message_text)}",
                 parse_mode='HTML'
             )
             await update.message.reply_text("Your message has been sent to the person handling your order.")
@@ -958,6 +961,41 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("Failed to send message. Please try again later.")
     else:
         await update.message.reply_text("Could not find the person handling your order.")
+
+    return ConversationHandler.END
+
+
+async def worker_chat_start(update: Update, context: CallbackContext) -> int:
+    """Starts the worker-to-customer chat conversation."""
+    query = update.callback_query
+    await query.answer()
+    order_id = query.data.split("_")[-1]
+    context.user_data["worker_chat_order_id"] = order_id
+    await query.message.reply_text("Please type the message you want to send to the customer.")
+    return WORKER_CHAT_MESSAGE
+
+
+async def worker_chat_send(update: Update, context: CallbackContext) -> int:
+    """Sends the worker's message to the customer."""
+    message_text = update.message.text
+    order_id = context.user_data.get("worker_chat_order_id")
+    order = get_order_by_id(int(order_id))
+
+    if order and order.get('user_id'):
+        customer_id = int(order.get('user_id'))
+        worker = update.effective_user
+        try:
+            await context.bot.send_message(
+                chat_id=customer_id,
+                text=f"💬 <b>Message from Willis Kitchen (Order #{order_id})</b>:\n\n{html.escape(message_text)}",
+                parse_mode='HTML'
+            )
+            await update.message.reply_text("Your message has been sent to the customer.")
+        except Exception as e:
+            logger.error(f"Failed to send message to customer {customer_id}: {e}")
+            await update.message.reply_text("Failed to send message. The customer might have blocked the bot.")
+    else:
+        await update.message.reply_text("Could not find the customer for this order.")
 
     return ConversationHandler.END
 
@@ -1833,7 +1871,7 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     summary += f"<b>Total: ₦{total}</b>\n\n"
     summary += "Transfer to:\n"
     summary += "7078850843\n"
-    summary += "palmpay"
+    summary += "opay"
 
     keyboard = [
         [
@@ -2623,10 +2661,17 @@ async def main() -> None:
         fallbacks=[CommandHandler("start", start_over)],
     )
 
+    worker_chat_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(worker_chat_start, pattern="^worker_chat_")],
+        states={WORKER_CHAT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_chat_send)]},
+        fallbacks=[CommandHandler("start", start_over)],
+    )
+
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
     application.add_handler(delivery_issue_conv_handler)
     application.add_handler(follow_up_conv_handler)
+    application.add_handler(worker_chat_conv_handler)
     application.add_handler(main_conv_handler)
     
     # Top-level handlers
