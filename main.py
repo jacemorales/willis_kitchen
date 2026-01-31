@@ -478,11 +478,34 @@ async def notify_workers(context: CallbackContext, order_id: int):
         target_gender = "female"
 
     if not target_gender:
+        # Fallback: Notify admin
+        try:
+            admin_msg = f"⚠️ <b>Cafe Order Notification Fallback</b>\n\n"
+            admin_msg += f"Could not determine worker gender for location: <i>{html.escape(location)}</i>\n"
+            admin_msg += f"Order ID: #{order_id}\n\n"
+            summary = await get_order_summary_for_worker(order, for_admin=True)
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg + summary, parse_mode='HTML')
+            logger.info(f"Admin notified for Cafe order #{order_id} (gender detection failed)")
+        except Exception as e:
+            logger.error(f"Failed to notify admin as fallback for Cafe order #{order_id}: {e}")
         return
 
     all_workers = get_all_workers()
     eligible_workers = [w for w in all_workers if w.get('gender') == target_gender]
     
+    if not eligible_workers:
+        # Fallback: Notify admin
+        try:
+            admin_msg = f"⚠️ <b>Cafe Order Notification Fallback</b>\n\n"
+            admin_msg += f"No approved <b>{target_gender}</b> workers found for location: <i>{html.escape(location)}</i>\n"
+            admin_msg += f"Order ID: #{order_id}\n\n"
+            summary = await get_order_summary_for_worker(order, for_admin=True)
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg + summary, parse_mode='HTML')
+            logger.info(f"Admin notified for Cafe order #{order_id} (no eligible workers found)")
+        except Exception as e:
+            logger.error(f"Failed to notify admin as fallback for Cafe order #{order_id}: {e}")
+        return
+
     summary = await get_order_summary_for_worker(order)
     keyboard = [[InlineKeyboardButton("✅ Review Order", callback_data=f"review_{order_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -919,7 +942,7 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
     message_text = update.message.text
     order_id = context.user_data.get("follow_up_order_id")
     order = get_order_by_id(int(order_id))
-    
+
     if order and order.get('taken_by'):
         worker_id = int(order.get('taken_by'))
         user = update.effective_user
@@ -935,7 +958,7 @@ async def order_follow_up_send(update: Update, context: CallbackContext) -> int:
             await update.message.reply_text("Failed to send message. Please try again later.")
     else:
         await update.message.reply_text("Could not find the person handling your order.")
-    
+
     return ConversationHandler.END
 
 
@@ -1755,6 +1778,12 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     return await start(update, context)
 
 
+async def start_over(update: Update, context: CallbackContext) -> int:
+    """Fallback handler for /start that ends current conversation and shows main menu."""
+    await start(update, context)
+    return ConversationHandler.END
+
+
 async def show_order_summary(update: Update, context: CallbackContext) -> int:
     """Calculates the total price and shows the simplified order summary."""
     order = context.user_data["order"]
@@ -2329,7 +2358,7 @@ async def customer_feedback_save(update: Update, context: CallbackContext) -> in
     user = update.effective_user
     feedback_text = update.message.text
     add_feedback(user_id=user.id, username=user.username, name=user.full_name, feedback_text=feedback_text)
-    
+
     # Notify admin
     try:
         admin_msg = f"🆕 <b>New Customer Feedback</b>\n\n"
@@ -2347,7 +2376,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
     """Displays customer feedback with pagination for the admin."""
     query = update.callback_query
     await query.answer()
-    
+
     # Extract page from callback_data (e.g., admin_feedback_page_1)
     page = 1
     if query.data.startswith("admin_feedback_page_"):
@@ -2358,7 +2387,7 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
 
     feedback_data = get_all_feedback()
     if not feedback_data:
-        await send_or_edit_message(update, "No customer feedback yet.", 
+        await send_or_edit_message(update, "No customer feedback yet.",
                                  reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")]]))
         return ADMIN_MENU
 
@@ -2388,9 +2417,9 @@ async def view_feedback_admin(update: Update, context: CallbackContext) -> int:
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin_feedback_page_{page+1}"))
     if nav_row:
         keyboard.append(nav_row)
-    
+
     keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_main_menu")])
-    
+
     await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     return ADMIN_MENU
 
@@ -2461,7 +2490,7 @@ async def main() -> None:
             WORKER_ACCOUNT_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_account_number)],
             WORKER_ACCOUNT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_account_name)],
         },
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[CommandHandler("start", start_over)],
     )
 
     admin_conv_handler = ConversationHandler(
@@ -2497,14 +2526,18 @@ async def main() -> None:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_broadcast)
             ],
         },
-        fallbacks=[CommandHandler("admin", admin_start), CommandHandler("start", start)],
+        fallbacks=[CommandHandler("admin", admin_start), CommandHandler("start", start_over)],
     )
     
     main_conv_handler = ConversationHandler(
         entry_points=[
-            CommandHandler("start", start), 
+            CommandHandler("start", start),
             CallbackQueryHandler(start, pattern="^main_menu$"),
             CommandHandler("customer_feedback", customer_feedback_start),
+            CallbackQueryHandler(place_order_menu, pattern="^place_order$"),
+            CallbackQueryHandler(view_orders, pattern=r"^view_orders(_page_\d+)?$"),
+            CallbackQueryHandler(share_command, pattern="^share_bot$"),
+            CallbackQueryHandler(faq_handler, pattern="^faq$"),
         ],
         states={
             MAIN_MENU: [
@@ -2581,13 +2614,13 @@ async def main() -> None:
     delivery_issue_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(user_not_delivered_order, pattern="^user_not_delivered_")],
         states={GET_DELIVERY_ISSUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_delivery_issue)]},
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[CommandHandler("start", start_over)],
     )
 
     follow_up_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(order_follow_up_start, pattern="^order_follow_up_")],
         states={FOLLOW_UP_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_follow_up_send)]},
-        fallbacks=[CommandHandler("start", start)],
+        fallbacks=[CommandHandler("start", start_over)],
     )
 
     application.add_handler(admin_conv_handler)
