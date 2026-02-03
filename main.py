@@ -57,7 +57,7 @@ PRICES = {
     # Beverages
     "water": 300,
     "soft_drink": 600,
-    "malt": 800,
+    "malt": 900,
     "1ltr_drink": 2000,
     "willis_drink": 500,
     "ice": 250,
@@ -71,6 +71,7 @@ PRICES = {
     "spaghetti_half": 1300,
     "spaghetti_full": 2600,
     "gashia": 1200,
+    "chicken_sauce": 1200,
     "canned_corn": 2000,
     "cost_of_ingredients_half": 3000,
     "cost_of_ingredients_full": 6000,
@@ -272,7 +273,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_WILLIS_DRINK_QUANTITY,
     FOLLOW_UP_MESSAGE,
     WORKER_CHAT_MESSAGE,
-) = range(62)
+    INDOMIE_CHICKEN_SAUCE_QUANTITY,
+) = range(63)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -1204,6 +1206,7 @@ def indomie_mixings_keyboard():
             InlineKeyboardButton("Suya (price-based)", callback_data="mixing_suya"),
         ],
         [
+            InlineKeyboardButton("Chicken Sauce (₦1200)", callback_data="mixing_chicken_sauce"),
             InlineKeyboardButton("Sardine (₦1900)", callback_data="mixing_sardine"),
         ],
         [InlineKeyboardButton("None", callback_data="mixing_none")],
@@ -1231,6 +1234,8 @@ async def ask_for_mixing_quantities(update: Update, context: CallbackContext) ->
             message_text, next_state = "How many servings of gashia would you like?", GET_GASHIA_QUANTITY
         elif next_mixing_to_ask == "canned_corn":
             message_text, next_state = "How many servings of canned corn would you like?", GET_CANNED_CORN_QUANTITY
+        elif next_mixing_to_ask == "chicken_sauce":
+            message_text, next_state = "How many servings of chicken sauce would you like?", INDOMIE_CHICKEN_SAUCE_QUANTITY
         elif next_mixing_to_ask == "fried_fish" and order.get("food") == "Spaghetti":
              message_text, next_state = "How many pieces of fried fish would you like?", INDOMIE_FRIED_FISH_QUANTITY
 
@@ -1354,7 +1359,7 @@ def beverage_keyboard():
             InlineKeyboardButton("Soft Drink (₦600)", callback_data="bev_soft_drink"),
         ],
         [
-            InlineKeyboardButton("Malt (₦800)", callback_data="bev_malt"),
+            InlineKeyboardButton("Malt (₦900)", callback_data="bev_malt"),
             InlineKeyboardButton("1Ltr Drink (₦2000)", callback_data="bev_1ltr_drink"),
         ],
         [
@@ -1501,6 +1506,10 @@ async def get_boiled_egg_quantity(update: Update, context: CallbackContext) -> i
 
 async def get_fried_egg_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "fried_egg", INDOMIE_FRIED_EGG_QUANTITY)
+
+
+async def get_chicken_sauce_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_mixing_quantity(update, context, "chicken_sauce", INDOMIE_CHICKEN_SAUCE_QUANTITY)
 
 
 async def get_willis_drink_quantity(update: Update, context: CallbackContext) -> int:
@@ -2617,6 +2626,7 @@ async def main() -> None:
             INDOMIE_FRIED_FISH_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fried_fish_quantity)],
             GET_GASHIA_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_gashia_quantity)],
             GET_CANNED_CORN_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_canned_corn_quantity)],
+            INDOMIE_CHICKEN_SAUCE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_chicken_sauce_quantity)],
             INDOMIE_WATER_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_water_quantity)],
             INDOMIE_COKE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_coke_quantity)],
             INDOMIE_MALT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_malt_quantity)],
@@ -2652,18 +2662,21 @@ async def main() -> None:
         entry_points=[CallbackQueryHandler(user_not_delivered_order, pattern="^user_not_delivered_")],
         states={GET_DELIVERY_ISSUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_delivery_issue)]},
         fallbacks=[CommandHandler("start", start_over)],
+        per_message=True,
     )
 
     follow_up_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(order_follow_up_start, pattern="^order_follow_up_")],
         states={FOLLOW_UP_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_follow_up_send)]},
         fallbacks=[CommandHandler("start", start_over)],
+        per_message=True,
     )
 
     worker_chat_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(worker_chat_start, pattern="^worker_chat_")],
         states={WORKER_CHAT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_chat_send)]},
         fallbacks=[CommandHandler("start", start_over)],
+        per_message=True,
     )
 
     application.add_handler(admin_conv_handler)
@@ -2677,6 +2690,7 @@ async def main() -> None:
     application.add_handler(CommandHandler("share", share_command))
     application.add_handler(CallbackQueryHandler(review_order, pattern="^review_"))
     application.add_handler(CallbackQueryHandler(worker_accept_order, pattern="^accept_"))
+    application.add_handler(CallbackQueryHandler(decline_order, pattern="^decline_"))
     application.add_handler(CallbackQueryHandler(worker_delivered_order, pattern="^worker_delivered_"))
     application.add_handler(CallbackQueryHandler(worker_not_delivered_order, pattern="^worker_not_delivered_"))
     application.add_handler(CallbackQueryHandler(user_delivered_order, pattern="^user_delivered_"))
