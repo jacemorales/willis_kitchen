@@ -52,31 +52,58 @@ def add_order(user_id, username, food_type, items, total, service_charge, status
     items_str = json.dumps(items)
     delivery_info_str = json.dumps(delivery_info if delivery_info else {})
 
+    status_history = [{"status": status, "timestamp": order_date, "actor": "system"}]
+    status_json = json.dumps(status_history)
+
     # The new column 'spaghetti_quantity' will be column 14
     new_row = [
         order_id, user_id, username, food_type, items_str, total,
-        service_charge, order_date, status, delivery_info_str, notes,
+        service_charge, order_date, status_json, delivery_info_str, notes,
         "", "", spaghetti_quantity if spaghetti_quantity else ""
     ]
     orders_sheet.append_row(new_row)
     add_or_update_user(user_id, username, "")
     return order_id
 
+def _parse_order_status(order):
+    """Internal helper to parse JSON status history and set the current status."""
+    status_val = order.get('status')
+    if not status_val:
+        return order
+    try:
+        history = json.loads(status_val)
+        if isinstance(history, list) and len(history) > 0:
+            order['status_history'] = history
+            order['status'] = history[-1].get('status')
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return order
+
 def get_user_orders(user_id):
     """Retrieves all orders for a specific user."""
     all_orders = orders_sheet.get_all_records()
-    user_orders = [order for order in all_orders if order.get('user_id') == user_id]
+    user_orders = []
+    for order in all_orders:
+        if str(order.get('user_id')) == str(user_id):
+            user_orders.append(_parse_order_status(order))
     return user_orders
 
 def get_all_orders():
     """Retrieves all orders from the database, sorted by date."""
-    return orders_sheet.get_all_records()
+    all_orders = orders_sheet.get_all_records()
+    return [_parse_order_status(order) for order in all_orders]
 
 def get_orders_by_status(status):
     """Retrieves all orders with a specific status or statuses."""
     all_orders = orders_sheet.get_all_records()
     statuses = status if isinstance(status, tuple) else (status,)
-    return [order for order in all_orders if order.get('status') in statuses]
+
+    result = []
+    for order in all_orders:
+        parsed_order = _parse_order_status(order)
+        if parsed_order.get('status') in statuses:
+            result.append(parsed_order)
+    return result
 
 def get_order_by_id(order_id):
     """Retrieves an order by its ID."""
@@ -84,16 +111,32 @@ def get_order_by_id(order_id):
         cell = orders_sheet.find(str(order_id), in_column=1)
         row_values = orders_sheet.row_values(cell.row)
         headers = orders_sheet.row_values(1)
-        return dict(zip(headers, row_values))
+        order = dict(zip(headers, row_values))
+        return _parse_order_status(order)
     except AttributeError:
         return None
 
-def update_order_status(order_id, status, worker_id=None, delivery_issue=None):
+def update_order_status(order_id, status, actor='system', worker_id=None, delivery_issue=None):
     """Updates the status, taken_by, and delivery_issue fields of an order."""
     try:
         cell = orders_sheet.find(str(order_id), in_column=1)
-        # Column 9 is 'status'
-        orders_sheet.update_cell(cell.row, 9, status)
+
+        # Column 9 is 'status' (which is now a JSON status history)
+        status_json = orders_sheet.cell(cell.row, 9).value
+        try:
+            status_history = json.loads(status_json)
+            if not isinstance(status_history, list):
+                status_history = [{"status": status_json, "timestamp": "unknown", "actor": "unknown"}]
+        except (json.JSONDecodeError, TypeError):
+            status_history = [{"status": status_json, "timestamp": "unknown", "actor": "unknown"}]
+
+        status_history.append({
+            "status": status,
+            "timestamp": format_date(),
+            "actor": actor
+        })
+        orders_sheet.update_cell(cell.row, 9, json.dumps(status_history))
+
         if worker_id:
             # Column 12 is 'taken_by'
             orders_sheet.update_cell(cell.row, 12, worker_id)
@@ -165,10 +208,13 @@ def is_worker(user_id):
 def get_worker_orders(worker_id, status):
     """Retrievis orders taken by a worker with a specific status."""
     all_orders = orders_sheet.get_all_records()
-    return [
-        order for order in all_orders 
-        if order.get('taken_by') == worker_id and order.get('status') == status
-    ]
+    result = []
+    for order in all_orders:
+        if str(order.get('taken_by')) == str(worker_id):
+            parsed_order = _parse_order_status(order)
+            if parsed_order.get('status') == status:
+                result.append(parsed_order)
+    return result
     
 def add_feedback(user_id, username, name, feedback_text):
     """Adds customer feedback."""

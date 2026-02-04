@@ -55,7 +55,7 @@ PRICES = {
     "fried_fish": 1500,
 
     # Beverages
-    "water": 300,
+    "water": 400,
     "soft_drink": 600,
     "malt": 900,
     "1ltr_drink": 2000,
@@ -785,7 +785,7 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
         await send_or_edit_message(update, "This order has already been taken or is no longer available.")
         return
 
-    update_order_status(order_id, 'taken', worker_id)
+    update_order_status(order_id, 'taken', actor='worker', worker_id=worker_id)
 
     # Notify admin if a worker accepted it
     if worker_id != ADMIN_ID:
@@ -844,7 +844,7 @@ async def decline_order(update: Update, context: CallbackContext) -> int:
     await query.answer()
 
     order_id = int(query.data.split("_")[-1])
-    update_order_status(order_id, 'rejected')
+    update_order_status(order_id, 'rejected', actor='admin')
 
     await query.edit_message_text(f"You have rejected order #{order_id}.")
 
@@ -880,7 +880,7 @@ async def worker_delivered_order(update: Update, context: CallbackContext) -> No
         if payout > 0:
             update_worker_payout(worker_id, order_id, payout)
 
-    update_order_status(order_id, 'completed')
+    update_order_status(order_id, 'completed', actor='worker')
 
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="You have marked this order as delivered.")
@@ -891,7 +891,7 @@ async def worker_not_delivered_order(update: Update, context: CallbackContext) -
     query = update.callback_query
     await query.answer()
     order_id = int(query.data.split("_")[-1])
-    update_order_status(order_id, 'issue_reported')
+    update_order_status(order_id, 'issue_reported', actor='worker')
 
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="You have marked this order as not delivered. The admin will be notified.")
@@ -902,6 +902,9 @@ async def user_delivered_order(update: Update, context: CallbackContext) -> None
     query = update.callback_query
     await query.answer()
     
+    order_id = int(query.data.split("_")[-1])
+    update_order_status(order_id, 'completed', actor='customer')
+
     await query.edit_message_reply_markup(reply_markup=None)
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Thank you! Your order has been completed. We hope to serve you again!")
 
@@ -925,7 +928,7 @@ async def save_delivery_issue(update: Update, context: CallbackContext) -> int:
     issue_text = update.message.text
 
     if order_id:
-        update_order_status(order_id, 'issue_reported', delivery_issue=issue_text)
+        update_order_status(order_id, 'issue_reported', actor='customer', delivery_issue=issue_text)
 
     await update.message.reply_text("Thank you. Your issue has been noted and is currently being looked into. We’ll get back to you shortly. 🙏")
     return ConversationHandler.END
@@ -1355,7 +1358,7 @@ def beverage_keyboard():
     """Returns the keyboard for the beverage menu."""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Water (₦300)", callback_data="bev_water"),
+            InlineKeyboardButton("Bottle Water (₦400)", callback_data="bev_water"),
             InlineKeyboardButton("Soft Drink (₦600)", callback_data="bev_soft_drink"),
         ],
         [
@@ -1934,7 +1937,7 @@ async def handle_payment_screenshot(update: Update, context: CallbackContext) ->
         order_id, update.message.photo[-1].file_id,
         update.effective_user.username, order.get('total', 0)
     )
-    update_order_status(order_id, 'pending')
+    update_order_status(order_id, 'pending', actor='system')
 
     # Send the order summary
     order_summary = await get_order_summary_for_customer(order)
@@ -2085,6 +2088,7 @@ async def admin_main_menu_callback(update: Update, context: CallbackContext) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
     welcome_message = "Welcome Admin 👑 What would you like to manage today?"
     if update.callback_query:
+        await update.callback_query.answer()
         await send_or_edit_message(update, welcome_message, reply_markup=reply_markup)
     else:
         await update.message.reply_text(welcome_message, reply_markup=reply_markup)
@@ -2093,7 +2097,8 @@ async def admin_main_menu_callback(update: Update, context: CallbackContext) -> 
 async def admin_checkin_menu(update: Update, context: CallbackContext) -> int:
     """Shows the customer check-in message categories."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
     keyboard = [
         [InlineKeyboardButton("🌧️ Rainy", callback_data="checkin_rainy")],
         [InlineKeyboardButton("🥶 Cold", callback_data="checkin_cold")],
@@ -2334,7 +2339,14 @@ async def admin_view_order_details(update: Update, context: CallbackContext) -> 
     food_type = "Kitchen Order" if order.get('food_type', '') in ["Indomie", "Custard"] else "Cafe Order"
     summary = f"<b>Order Details for ID: {order_id} ({food_type})</b>\n\n"
     summary += f"<b>User:</b> @{order.get('username', 'N/A')}\n"
-    summary += f"<b>Status:</b> {order.get('status', 'N/A')}\n<b>Items:</b>\n"
+    summary += f"<b>Current Status:</b> {order.get('status', 'N/A').title()}\n"
+
+    if order.get('status_history'):
+        summary += "<b>Status History:</b>\n"
+        for entry in order.get('status_history', []):
+            summary += f"- {entry.get('status').title()} (by {entry.get('actor')}) at {entry.get('timestamp')}\n"
+
+    summary += "\n<b>Items:</b>\n"
 
     try:
         items = json.loads(order.get('items', '[]'))
@@ -2558,7 +2570,6 @@ async def main() -> None:
                 CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"),
                 CallbackQueryHandler(worker_accept_order, pattern="^accept_"),
                 CallbackQueryHandler(decline_order, pattern="^decline_"),
-                CallbackQueryHandler(view_ingredients, pattern="^view_ingredients_"),
             ],
             ADMIN_CHECKIN_MENU: [
                 CallbackQueryHandler(handle_checkin_broadcast, pattern="^checkin_(rainy|cold|hot|sunday|casual)$"),
@@ -2662,21 +2673,18 @@ async def main() -> None:
         entry_points=[CallbackQueryHandler(user_not_delivered_order, pattern="^user_not_delivered_")],
         states={GET_DELIVERY_ISSUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_delivery_issue)]},
         fallbacks=[CommandHandler("start", start_over)],
-        per_message=True,
     )
 
     follow_up_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(order_follow_up_start, pattern="^order_follow_up_")],
         states={FOLLOW_UP_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, order_follow_up_send)]},
         fallbacks=[CommandHandler("start", start_over)],
-        per_message=True,
     )
 
     worker_chat_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(worker_chat_start, pattern="^worker_chat_")],
         states={WORKER_CHAT_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_chat_send)]},
         fallbacks=[CommandHandler("start", start_over)],
-        per_message=True,
     )
 
     application.add_handler(admin_conv_handler)
@@ -2691,6 +2699,7 @@ async def main() -> None:
     application.add_handler(CallbackQueryHandler(review_order, pattern="^review_"))
     application.add_handler(CallbackQueryHandler(worker_accept_order, pattern="^accept_"))
     application.add_handler(CallbackQueryHandler(decline_order, pattern="^decline_"))
+    application.add_handler(CallbackQueryHandler(view_ingredients, pattern="^view_ingredients_"))
     application.add_handler(CallbackQueryHandler(worker_delivered_order, pattern="^worker_delivered_"))
     application.add_handler(CallbackQueryHandler(worker_not_delivered_order, pattern="^worker_not_delivered_"))
     application.add_handler(CallbackQueryHandler(user_delivered_order, pattern="^user_delivered_"))
