@@ -52,8 +52,25 @@ def add_order(user_id, username, food_type, items, total, service_charge, status
     items_str = json.dumps(items)
     delivery_info_str = json.dumps(delivery_info if delivery_info else {})
 
-    status_history = [{"status": status, "timestamp": order_date, "actor": "system"}]
-    status_json = json.dumps(status_history)
+    status_dict = {
+        "made_payment": {"status": False, "timestamp": ""},
+        "order_pending": {"status": False, "timestamp": ""},
+        "order_taken": {"status": False, "timestamp": ""},
+        "chef_delivered": {"status": False, "timestamp": ""},
+        "user_received": {"status": False, "timestamp": ""},
+        "rejected": {"status": False, "timestamp": ""},
+        "issue_reported": {"status": False, "timestamp": ""}
+    }
+
+    # Map initial status if possible
+    if status == 'pending':
+        status_dict["made_payment"] = {"status": True, "timestamp": order_date}
+        status_dict["order_pending"] = {"status": True, "timestamp": order_date}
+    elif status == 'pending_payment':
+        # Default starting state
+        pass
+
+    status_json = json.dumps(status_dict)
 
     # The new column 'spaghetti_quantity' will be column 14
     new_row = [
@@ -66,15 +83,34 @@ def add_order(user_id, username, food_type, items, total, service_charge, status
     return order_id
 
 def _parse_order_status(order):
-    """Internal helper to parse JSON status history and set the current status."""
+    """Internal helper to parse JSON status dictionary and set the current status."""
     status_val = order.get('status')
     if not status_val:
         return order
     try:
-        history = json.loads(status_val)
-        if isinstance(history, list) and len(history) > 0:
-            order['status_history'] = history
-            order['status'] = history[-1].get('status')
+        data = json.loads(status_val)
+        if isinstance(data, dict):
+            order['status_history_dict'] = data
+            # Determine current status based on the furthest 'True' value in the timeline
+            if data.get('rejected', {}).get('status'):
+                order['status'] = 'rejected'
+            elif data.get('issue_reported', {}).get('status'):
+                order['status'] = 'issue_reported'
+            elif data.get('user_received', {}).get('status'):
+                order['status'] = 'completed'
+            elif data.get('chef_delivered', {}).get('status'):
+                order['status'] = 'completed'
+            elif data.get('order_taken', {}).get('status'):
+                order['status'] = 'taken'
+            elif data.get('order_pending', {}).get('status'):
+                order['status'] = 'pending'
+            elif data.get('made_payment', {}).get('status'):
+                order['status'] = 'pending'
+            else:
+                order['status'] = 'pending_payment'
+        elif isinstance(data, list): # Fallback for the previous array format
+            order['status_history'] = data
+            order['status'] = data[-1].get('status')
     except (json.JSONDecodeError, TypeError):
         pass
     return order
@@ -123,19 +159,46 @@ def update_order_status(order_id, status, actor='system', worker_id=None, delive
 
         # Column 9 is 'status' (which is now a JSON status history)
         status_json = orders_sheet.cell(cell.row, 9).value
+        now = format_date()
         try:
-            status_history = json.loads(status_json)
-            if not isinstance(status_history, list):
-                status_history = [{"status": status_json, "timestamp": "unknown", "actor": "unknown"}]
+            status_data = json.loads(status_json)
+            if not isinstance(status_data, dict):
+                # Attempt to migrate or just start fresh if it's the old array/string format
+                status_data = {
+                    "made_payment": {"status": False, "timestamp": ""},
+                    "order_pending": {"status": False, "timestamp": ""},
+                    "order_taken": {"status": False, "timestamp": ""},
+                    "chef_delivered": {"status": False, "timestamp": ""},
+                    "user_received": {"status": False, "timestamp": ""}
+                }
         except (json.JSONDecodeError, TypeError):
-            status_history = [{"status": status_json, "timestamp": "unknown", "actor": "unknown"}]
+            status_data = {
+                "made_payment": {"status": False, "timestamp": ""},
+                "order_pending": {"status": False, "timestamp": ""},
+                "order_taken": {"status": False, "timestamp": ""},
+                "chef_delivered": {"status": False, "timestamp": ""},
+                "user_received": {"status": False, "timestamp": ""},
+                "rejected": {"status": False, "timestamp": ""},
+                "issue_reported": {"status": False, "timestamp": ""}
+            }
 
-        status_history.append({
-            "status": status,
-            "timestamp": format_date(),
-            "actor": actor
-        })
-        orders_sheet.update_cell(cell.row, 9, json.dumps(status_history))
+        # Mapping statuses to the new dictionary keys
+        if status == 'pending':
+            status_data["made_payment"] = {"status": True, "timestamp": now}
+            status_data["order_pending"] = {"status": True, "timestamp": now}
+        elif status == 'taken':
+            status_data["order_taken"] = {"status": True, "timestamp": now}
+        elif status == 'completed':
+            if actor == 'worker':
+                status_data["chef_delivered"] = {"status": True, "timestamp": now}
+            elif actor == 'customer':
+                status_data["user_received"] = {"status": True, "timestamp": now}
+        elif status == 'rejected':
+            status_data["rejected"] = {"status": True, "timestamp": now}
+        elif status == 'issue_reported':
+            status_data["issue_reported"] = {"status": True, "timestamp": now}
+
+        orders_sheet.update_cell(cell.row, 9, json.dumps(status_data))
 
         if worker_id:
             # Column 12 is 'taken_by'
