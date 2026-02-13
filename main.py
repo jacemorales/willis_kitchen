@@ -49,6 +49,8 @@ PRICES = {
     "fried_egg": 500,
     "sausage": 400,
     "sardine": 1900,
+    "curry": 300,
+    "thyme": 300,
     "chicken_1000": 1000,
     "chicken_1500": 1500,
     "chicken_3000": 3000,
@@ -60,6 +62,7 @@ PRICES = {
     "malt": 900,
     "1ltr_drink": 2000,
     "willis_drink": 500,
+    "willis_drink_tropical": 1000,
     "ice": 250,
 
     # Custard items
@@ -68,20 +71,20 @@ PRICES = {
     "milk": 400,
 
     # Spaghetti items
-    "spaghetti_half": 1300,
-    "spaghetti_full": 2600,
+    "spaghetti_half": 1000,
+    "spaghetti_full": 2000,
     "gashia": 1200,
     "chicken_sauce": 1200,
     "canned_corn": 2000,
-    "cost_of_ingredients_half": 3000,
-    "cost_of_ingredients_full": 6000,
+    "cost_of_ingredients_half": 2800,
+    "cost_of_ingredients_full": 4000,
 
     # Fees and Service Charges
     "pack_fee": 300,
     "service_charge_indomie": 250,
     "service_charge_custard": 250,
-    "service_charge_spaghetti_half": 1500,
-    "service_charge_spaghetti_full": 3000,
+    "service_charge_spaghetti_half": 1000,
+    "service_charge_spaghetti_full": 2000,
 }
 
 
@@ -155,6 +158,8 @@ async def get_order_summary_for_worker(order: dict, for_admin=False) -> str:
         summary += f"<b>Payout:</b> ₦{worker_payout}\n"
     elif for_admin: # For Kitchen Orders, only admin sees service charge
         summary += f"\n<b>Service Charge:</b> ₦{service_charge}\n"
+
+    summary += f"<b>Total:</b> ₦{order.get('total', 0)}\n"
 
     return summary
 
@@ -274,7 +279,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     FOLLOW_UP_MESSAGE,
     WORKER_CHAT_MESSAGE,
     INDOMIE_CHICKEN_SAUCE_QUANTITY,
-) = range(63)
+    INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY,
+) = range(64)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -1212,6 +1218,10 @@ def indomie_mixings_keyboard():
             InlineKeyboardButton("Chicken Sauce (₦1200)", callback_data="mixing_chicken_sauce"),
             InlineKeyboardButton("Sardine (₦1900)", callback_data="mixing_sardine"),
         ],
+        [
+            InlineKeyboardButton("Curry (₦300)", callback_data="mixing_curry"),
+            InlineKeyboardButton("Thyme (₦300)", callback_data="mixing_thyme"),
+        ],
         [InlineKeyboardButton("None", callback_data="mixing_none")],
         [InlineKeyboardButton("Done ✅", callback_data="mixing_done")],
     ])
@@ -1366,7 +1376,10 @@ def beverage_keyboard():
             InlineKeyboardButton("1Ltr Drink (₦2000)", callback_data="bev_1ltr_drink"),
         ],
         [
-            InlineKeyboardButton("Willis Drink (₦500)", callback_data="bev_willis_drink"),
+            InlineKeyboardButton("Willis Drink Regular (₦500)", callback_data="bev_willis_drink"),
+            InlineKeyboardButton("Willis Drink Tropical (₦1000)", callback_data="bev_willis_drink_tropical"),
+        ],
+        [
             InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")
         ],
         [InlineKeyboardButton("None", callback_data="bev_none")],
@@ -1391,7 +1404,9 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
         elif next_beverage_to_ask == "1ltr_drink":
             message_text, next_state = "How many 1Ltr drinks would you like?", INDOMIE_JUICE_QUANTITY
         elif next_beverage_to_ask == "willis_drink":
-            message_text, next_state = "How many Willis drinks would you like?", INDOMIE_WILLIS_DRINK_QUANTITY
+            message_text, next_state = "How many Willis drinks (Regular) would you like?", INDOMIE_WILLIS_DRINK_QUANTITY
+        elif next_beverage_to_ask == "willis_drink_tropical":
+            message_text, next_state = "How many Willis drinks (Tropical) would you like?", INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY
         elif next_beverage_to_ask == "ice":
             message_text, next_state = "How many packs of ice would you like?", INDOMIE_ICE_QUANTITY
 
@@ -1517,6 +1532,9 @@ async def get_chicken_sauce_quantity(update: Update, context: CallbackContext) -
 
 async def get_willis_drink_quantity(update: Update, context: CallbackContext) -> int:
     return await get_beverage_quantity(update, context, "willis_drink", INDOMIE_WILLIS_DRINK_QUANTITY)
+
+async def get_willis_drink_tropical_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_beverage_quantity(update, context, "willis_drink_tropical", INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY)
 
 async def get_sausage_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "sausage", INDOMIE_SAUSAGE_QUANTITY)
@@ -1803,6 +1821,9 @@ def spaghetti_mixings_keyboard():
         [
             InlineKeyboardButton(f"Gashia (₦{PRICES.get('gashia', 0)})", callback_data="mixing_gashia"),
             InlineKeyboardButton(f"Canned Corn (₦{PRICES.get('canned_corn', 0)})", callback_data="mixing_canned_corn"),
+        ],
+        [
+            InlineKeyboardButton(f"Sardine (₦{PRICES.get('sardine', 0)})", callback_data="mixing_sardine"),
         ],
         [InlineKeyboardButton("None", callback_data="mixing_none")],
         [InlineKeyboardButton("Done ✅", callback_data="mixing_done")],
@@ -2341,7 +2362,13 @@ async def admin_view_order_details(update: Update, context: CallbackContext) -> 
     summary += f"<b>User:</b> @{order.get('username', 'N/A')}\n"
     summary += f"<b>Current Status:</b> {order.get('status', 'N/A').title()}\n"
 
-    if order.get('status_history'):
+    if order.get('status_history_dict'):
+        summary += "<b>Status History:</b>\n"
+        history = order.get('status_history_dict')
+        for key, val in history.items():
+            status_text = "✅" if val.get('status') else "❌"
+            summary += f"- {key.replace('_', ' ').title()}: {status_text} {val.get('timestamp')}\n"
+    elif order.get('status_history'):
         summary += "<b>Status History:</b>\n"
         for entry in order.get('status_history', []):
             summary += f"- {entry.get('status').title()} (by {entry.get('actor')}) at {entry.get('timestamp')}\n"
@@ -2509,26 +2536,29 @@ async def view_ingredients(update: Update, context: CallbackContext) -> int:
         ingredients = (
             "<b>Half Portion Spaghetti Ingredients:</b>\n\n"
             "- Tomato Paste: ₦500\n"
-            "- Vegetables: ₦400\n"
-            "- Pepper: ₦250\n"
-            "- Salt: ₦100\n"
-            "- Thyme: ₦250\n"
-            "- Sausage: ₦500\n"
-            "- Sardine: ₦1000\n"
+            "- Vegetables: ₦700\n"
+            "- Pepper: ₦200\n"
+            "- Salt: ₦200\n"
+            "- Thyme: ₦200\n"
+            "- Chicken Sauce: ₦1000\n"
+            "----------------------\n"
+            "<b>Total: ₦2800</b>"
         )
     else: # Full portion
         ingredients = (
             "<b>Full Portion Spaghetti Ingredients:</b>\n\n"
             "- Tomato Paste: ₦1000\n"
-            "- Vegetables: ₦800\n"
-            "- Pepper: ₦500\n"
+            "- Vegetables: ₦1400\n"
+            "- Pepper: ₦200\n"
             "- Salt: ₦200\n"
-            "- Thyme: ₦500\n"
-            "- Sausage: ₦1000\n"
-            "- Sardine: ₦2000\n"
+            "- Thyme: ₦200\n"
+            "- Chicken Sauce: ₦1000\n"
+            "----------------------\n"
+            "<b>Total: ₦4000</b>"
         )
     
-    await send_or_edit_message(update, ingredients, parse_mode='HTML')
+    keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"review_{order_id}")]]
+    await send_or_edit_message(update, ingredients, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
     return ADMIN_MENU
 
 
@@ -2643,6 +2673,7 @@ async def main() -> None:
             INDOMIE_MALT_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_malt_quantity)],
             INDOMIE_JUICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_juice_quantity)],
             INDOMIE_WILLIS_DRINK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_quantity)],
+            INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_tropical_quantity)],
             INDOMIE_ICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ice_quantity)],
             CUSTARD_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, custard_quantity)],
             CUSTARD_SOURCE: [CallbackQueryHandler(custard_source, pattern="^custard_source_")],
