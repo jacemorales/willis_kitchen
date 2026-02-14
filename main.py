@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import Forbidden, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -280,7 +281,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     WORKER_CHAT_MESSAGE,
     INDOMIE_CHICKEN_SAUCE_QUANTITY,
     INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY,
-) = range(64)
+    DECLINE_REASON,
+) = range(65)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -844,29 +846,75 @@ async def worker_accept_order(update: Update, context: CallbackContext) -> None:
             logger.error(f"Failed to send order acceptance notification to user {user_id}: {e}")
 
 
-async def decline_order(update: Update, context: CallbackContext) -> int:
-    """Handles an admin declining an order."""
+async def decline_order_start(update: Update, context: CallbackContext) -> int:
+    """Starts the decline order process by asking for a reason."""
     query = update.callback_query
     await query.answer()
 
     order_id = int(query.data.split("_")[-1])
-    update_order_status(order_id, 'rejected', actor='admin')
+    context.user_data["decline_order_id"] = order_id
 
-    await query.edit_message_text(f"You have rejected order #{order_id}.")
+    await query.edit_message_text(
+        f"You are about to decline order #{order_id}.\n\n"
+        "Please type the reason for declining this order, or send /skip if you don't want to provide a reason."
+    )
+    return DECLINE_REASON
+
+
+async def decline_order_reason(update: Update, context: CallbackContext) -> int:
+    """Handles the reason text for declining an order."""
+    reason = update.message.text
+    return await decline_order_finish(update, context, reason)
+
+
+async def decline_order_skip(update: Update, context: CallbackContext) -> int:
+    """Handles skipping the reason for declining an order."""
+    return await decline_order_finish(update, context, None)
+
+
+async def decline_order_finish(update: Update, context: CallbackContext, reason: str) -> int:
+    """Finalizes the order decline process."""
+    order_id = context.user_data.get("decline_order_id")
+    if not order_id:
+        await update.message.reply_text("Error: Order ID not found. Please try again.")
+        return ConversationHandler.END
+
+    user = update.effective_user
+    is_admin = user.id == ADMIN_ID
+    actor = 'admin' if is_admin else 'worker'
+
+    update_order_status(order_id, 'rejected', actor=actor, delivery_issue=reason)
+
+    await update.message.reply_text(f"✅ Order #{order_id} has been declined.")
 
     # Notify user
     order = get_order_by_id(order_id)
     if order and order.get('user_id'):
         user_id = order.get('user_id')
+        rejection_msg = f"Unfortunately, your order #{order_id} has been declined."
+        if reason:
+            rejection_msg += f"\n\n<b>Reason:</b> {html.escape(reason)}"
+
         try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"Unfortunately, your order #{order_id} has been declined by the admin."
-            )
+            await context.bot.send_message(chat_id=user_id, text=rejection_msg, parse_mode='HTML')
         except Exception as e:
             logger.error(f"Failed to send order decline notification to user {user_id}: {e}")
 
-    return ADMIN_MENU
+    # Notify admin if it was a worker who declined
+    if not is_admin:
+        try:
+            admin_msg = f"🚫 <b>Order Declined by Worker</b>\n"
+            admin_msg += f"Order ID: #{order_id}\n"
+            admin_msg += f"Worker: {user.full_name} (@{user.username})\n"
+            if reason:
+                admin_msg += f"Reason: {html.escape(reason)}"
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Failed to notify admin of worker decline: {e}")
+
+    if is_admin:
+        return await admin_main_menu_callback(update, context)
+    return ConversationHandler.END
 
 
 async def worker_delivered_order(update: Update, context: CallbackContext) -> None:
@@ -2164,12 +2212,39 @@ async def handle_custom_broadcast(update: Update, context: CallbackContext) -> i
     return await admin_checkin_menu(update, context)
 
 async def broadcast_message(context: CallbackContext, message: str):
-    user_ids = get_all_unique_users()
+    user_ids = list(set(get_all_unique_users()))
+    count = 0
+    success = 0
+    total = len(user_ids)
+
+    logger.info(f"Starting broadcast to {total} users.")
+
     for user_id in user_ids:
         try:
             await context.bot.send_message(chat_id=user_id, text=message)
+            success += 1
+            await asyncio.sleep(0.05)  # Small delay to avoid rate limits
+        except RetryAfter as e:
+            logger.warning(f"Rate limit hit. Sleeping for {e.retry_after} seconds.")
+            await asyncio.sleep(e.retry_after)
+            # Retry once after sleeping
+            try:
+                await context.bot.send_message(chat_id=user_id, text=message)
+                success += 1
+            except Exception as retry_e:
+                logger.error(f"Failed to send broadcast to user {user_id} after retry: {retry_e}")
+        except Forbidden:
+            logger.warning(f"User {user_id} has blocked the bot.")
+        except TelegramError as e:
+            logger.error(f"Telegram error sending broadcast to user {user_id}: {e}")
         except Exception as e:
-            logger.error(f"Failed to send broadcast to user {user_id}: {e}")
+            logger.error(f"Unexpected error sending broadcast to user {user_id}: {e}")
+
+        count += 1
+        if count % 50 == 0:
+            logger.info(f"Broadcast progress: {count}/{total} users processed.")
+
+    logger.info(f"Broadcast completed. Successfully sent to {success}/{total} users.")
 
 
 async def admin_password(update: Update, context: CallbackContext) -> int:
@@ -2233,7 +2308,8 @@ async def review_order(update: Update, context: CallbackContext) -> int:
         ])
     elif is_worker(user.id):
         keyboard.append([
-            InlineKeyboardButton("✅ Accept Order", callback_data=f"accept_{order_id}")
+            InlineKeyboardButton("✅ Accept Order", callback_data=f"accept_{order_id}"),
+            InlineKeyboardButton("❌ Decline Order", callback_data=f"decline_{order_id}")
         ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2599,7 +2675,6 @@ async def main() -> None:
                 CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
                 CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"),
                 CallbackQueryHandler(worker_accept_order, pattern="^accept_"),
-                CallbackQueryHandler(decline_order, pattern="^decline_"),
             ],
             ADMIN_CHECKIN_MENU: [
                 CallbackQueryHandler(handle_checkin_broadcast, pattern="^checkin_(rainy|cold|hot|sunday|casual)$"),
@@ -2718,6 +2793,18 @@ async def main() -> None:
         fallbacks=[CommandHandler("start", start_over)],
     )
 
+    decline_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(decline_order_start, pattern="^decline_")],
+        states={
+            DECLINE_REASON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, decline_order_reason),
+                CommandHandler("skip", decline_order_skip),
+            ]
+        },
+        fallbacks=[CommandHandler("start", start_over)],
+    )
+
+    application.add_handler(decline_conv_handler)
     application.add_handler(admin_conv_handler)
     application.add_handler(worker_conv_handler)
     application.add_handler(delivery_issue_conv_handler)
@@ -2729,7 +2816,6 @@ async def main() -> None:
     application.add_handler(CommandHandler("share", share_command))
     application.add_handler(CallbackQueryHandler(review_order, pattern="^review_"))
     application.add_handler(CallbackQueryHandler(worker_accept_order, pattern="^accept_"))
-    application.add_handler(CallbackQueryHandler(decline_order, pattern="^decline_"))
     application.add_handler(CallbackQueryHandler(view_ingredients, pattern="^view_ingredients_"))
     application.add_handler(CallbackQueryHandler(worker_delivered_order, pattern="^worker_delivered_"))
     application.add_handler(CallbackQueryHandler(worker_not_delivered_order, pattern="^worker_not_delivered_"))
