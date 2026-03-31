@@ -2007,9 +2007,6 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
                 name = name.replace('_', ' ').title()
             quantity = item.get("quantity", 0)
             summary += f"- {name} (x{quantity})\n"
-
-        summary += f"- Service Charge\n"
-        summary += f"- Pack\n"
     else:
         summary = "<b>Here is your order summary:</b>\n\n"
         for item in current_items:
@@ -2018,11 +2015,6 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
             name = item.get("name", "Unknown Item").replace('_', ' ').title()
             quantity = item.get("quantity", 0)
             summary += f"- {name} (x{quantity})\n"
-
-        if service_charge > 0:
-            summary += f"- Service Charge\n"
-        if pack_fee > 0:
-            summary += f"- Pack\n"
 
     if order.get("notes"):
         summary += f"\n<b>Notes:</b> {order['notes']}\n"
