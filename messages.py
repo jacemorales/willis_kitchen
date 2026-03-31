@@ -24,13 +24,13 @@ RAINY = [
 ]
 
 COLD = [
-    "Brrr, feeling that chilly breeze? 🥶🌬️ It's the perfect time to warm up from the inside out! A hot, savory bowl of our custom-made Indomie is like a warm hug in a bowl. 🤗 Don't shiver, just order! 📲 We'll make sure you get a meal that's both hearty and heartwarming. 🔥❤️",
+    "Brrr, feeling that chilly breeze? 🥶🌬️ It's the perfect time to warm up from the inside out! A hot, savory bowl of our custom-made Indomie is like a warm hug in a bowl. 🤗 Don't shiver, just order! 📲 we'll make sure you get a meal that's both hearty and heartwarming. 🔥❤️",
     "The temperature is dropping 📉, but our kitchen is heating up! 🔥 Beat the cold with a meal that packs a punch. 💥 Our spicy noodles 🌶️🍜 are guaranteed to bring the heat, or perhaps a rich, creamy custard 🍮 to warm your soul? 🥰 Don't let the cold win – order your perfect warm-up meal now! 💪🏆",
-    "Cold days 🥶 call for comfort food 🍲, and we're the experts! 🧑‍🍳 Why not treat yourself to a delicious, hassle-free meal? 🤷‍♀️ No need to step out into the cold. 🙅‍♂️ We'll bring your order right to your doorstep 🚪, hot and ready to enjoy. Your cozy, delicious evening is just a few taps away. 📲✨"
+    "Cold days 🥶 call for comfort food 🍲, and we're the experts! 🧑‍🍳 Why not treat yourself to a delicious, hassle-free meal? 🤷‍♀️ No need to step out into the cold. 🙅‍♂️ we'll bring your order right to your doorstep 🚪, hot and ready to enjoy. Your cozy, delicious evening is just a few taps away. 📲✨"
 ]
 
 HOT = [
-    "☀️🥵 It's a scorcher out there! Don't even think about turning on a stove. 🔥 Stay cool 😎, stay hydrated 💧, and let us handle lunch. 🧊 Order a delicious meal 🥗 and pair it with an ice-cold beverage 🥤 from our café. We'll bring it right to you 🚚, so you can relax in the cool comfort of your room. 😎😌",
+    "☀️🥵 It's a scorcher out there! Don't even think about turning on a stove. 🔥 Stay cool 😎, stay hydrated 💧, and let us handle lunch. 🧊 Order a delicious meal 🥗 and pair it with an ice-cold beverage 🥤 from our café. we'll bring it right to you 🚚, so you can relax in the cool comfort of your room. 😎😌",
     "Feeling the heat? 🔥🥵 Beat the kitchen heat and let us do the cooking for you! A fresh, tasty meal 🍝 is the perfect way to refuel on a hot day. Plus, you can add a refreshing drink 🍹 to your order to really cool down. Why sweat 🥵 when you can order? 💧",
     "The sun is shining ☀️ and your next delicious meal is just an order away! 📲 Keep your energy up without the hassle of cooking. Whether you're craving something light 🥗 or a full, satisfying meal 🥘, we've got you covered. Order now and make your sunny day even brighter! ✨🌟"
 ]
@@ -48,6 +48,12 @@ CASUAL = [
 ]
 
 FAQ_MESSAGE = """
+- Tell me about the Noodles Menu?
+Note that the Indomie noodles menu is served with noodles from the kitchen. You can still cook with your own noodles by using the "Custom Order" option.
+All "Regular" meals come with 3 noodle packs, while "Supreme" meals come with 4 noodle packs.
+"Chicken Delight" is your noodles served with chicken.
+"Noodles Eggacious" is your noodles served with a three-egg combo: one egg cooked with your noodles, one boiled egg, and one fried egg.
+
 - How long does delivery take?
 Delivery typically takes 15-25 minutes, but this can vary based on the number of orders we have at the moment.
 
