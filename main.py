@@ -1135,7 +1135,6 @@ async def indomie_preset(update: Update, context: CallbackContext) -> int:
     return await ask_for_beverages(update, context)
 
 
-
 async def indomie_flavor(update: Update, context: CallbackContext) -> int:
     """Stores the flavor and asks for the size."""
     query = update.callback_query
@@ -1279,7 +1278,7 @@ async def indomie_mixings(update: Update, context: CallbackContext) -> int:
     item_name = selection 
 
     # For Indomie, spices are added directly. For Spaghetti, they are treated like other mixings.
-    if "spice" in item_name and not is_spaghetti:
+    if ("spice" in item_name or item_name in ["curry", "thyme"]) and not is_spaghetti:
         existing_item = next((item for item in items if item["name"] == item_name), None)
         if existing_item:
             items.remove(existing_item)
@@ -1318,6 +1317,10 @@ def indomie_mixings_keyboard():
             InlineKeyboardButton("Crayfish Spice (₦200)", callback_data="mixing_crayfish_spice"),
         ],
         [
+            InlineKeyboardButton("Curry (₦300)", callback_data="mixing_curry"),
+            InlineKeyboardButton("Thyme (₦300)", callback_data="mixing_thyme"),
+        ],
+        [
             InlineKeyboardButton("Vegetables (₦800)", callback_data="mixing_vegetables"),
             InlineKeyboardButton("Suya (price-based)", callback_data="mixing_suya"),
         ],
@@ -1325,13 +1328,10 @@ def indomie_mixings_keyboard():
             InlineKeyboardButton("Chicken Sauce (₦1200)", callback_data="mixing_chicken_sauce"),
             InlineKeyboardButton("Sardine (₦1900)", callback_data="mixing_sardine"),
         ],
-        [
-            InlineKeyboardButton("Curry (₦300)", callback_data="mixing_curry"),
-            InlineKeyboardButton("Thyme (₦300)", callback_data="mixing_thyme"),
-        ],
         [InlineKeyboardButton("None", callback_data="mixing_none")],
         [InlineKeyboardButton("Done ✅", callback_data="mixing_done")],
     ])
+
 
 
 async def ask_for_mixing_quantities(update: Update, context: CallbackContext) -> int:
@@ -2006,14 +2006,10 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
             if item.get("type") != "preset_item":
                 name = name.replace('_', ' ').title()
             quantity = item.get("quantity", 0)
-            item_total = item.get("total_price", 0)
-            summary += f"- {name} (x{quantity}) = ₦{item_total}\n"
+            summary += f"- {name} (x{quantity})\n"
 
-        summary += f"- Service Charge = ₦{service_charge}\n"
-        summary += f"- Pack = ₦{pack_fee}\n"
-
-        if order.get("notes"):
-            summary += f"\n<b>Notes:</b> {order['notes']}\n"
+        summary += f"- Service Charge\n"
+        summary += f"- Pack\n"
     else:
         summary = "<b>Here is your order summary:</b>\n\n"
         for item in current_items:
@@ -2023,8 +2019,13 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
             quantity = item.get("quantity", 0)
             summary += f"- {name} (x{quantity})\n"
 
-        if order.get("notes"):
-            summary += f"\n<b>Notes:</b> {order['notes']}\n"
+        if service_charge > 0:
+            summary += f"- Service Charge\n"
+        if pack_fee > 0:
+            summary += f"- Pack\n"
+
+    if order.get("notes"):
+        summary += f"\n<b>Notes:</b> {order['notes']}\n"
 
     summary += "----------------------\n"
     summary += f"<b>Total: ₦{total}</b>\n\n"
@@ -2042,7 +2043,6 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_or_edit_message(update, summary, reply_markup=reply_markup, parse_mode='HTML')
     return ORDER_SUMMARY
-
 
 
 async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
@@ -2115,7 +2115,7 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     if order.get("is_preset"):
         bill = f"<b>{order.get('name', 'Noodles')}:</b>\n\n"
     else:
-        bill = "📋 <b>Billing Breakdown</b>:\n"
+        bill = "📋 <b>Billing Breakdown</b>:\n\n"
 
     items = order.get("items", []).copy()
     for item in items:
@@ -2129,40 +2129,33 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
 
         quantity = item.get("quantity", 0)
         item_total = item.get("total_price", 0)
-        unit_price = item.get("unit_price", 0)
 
-        if order.get("is_preset"):
-            bill += f"- {name} (x{quantity}) = ₦{item_total}\n"
+        if name.lower() == "suya":
+            bill += f"- {name} (Amount) = ₦{item_total}\n"
         else:
-            if name.lower() == "suya":
-                bill += f"- {name} (Amount) = ₦{item_total}\n"
-            else:
-                bill += f"- {name} (x{quantity}) = ₦{item_total}\n"
+            bill += f"- {name} (x{quantity}) = ₦{item_total}\n"
 
     if order.get("is_preset"):
         pack_fee = order.get("pack_fee", 200)
         service_charge = order.get("service_charge", 0)
-        total = order.get("total", 0)
-        bill += f"- Service Charge = ₦{service_charge}\n"
-        bill += f"- Pack = ₦{pack_fee}\n"
-        bill += "--------------\n"
-        bill += f"Total ₦{total}"
     else:
         pack_fee = PRICES.get("pack_fee", 0) if order.get("food") in ["Indomie", "Custard", "Spaghetti"] else 0
         service_charge = order.get("service_charge", 0)
-        total = order.get("total", 0)
 
-        # Explicitly add cost of ingredients for spaghetti in the bill
-        if order.get("food") == "Spaghetti":
-            cost_item = next((item for item in items if item.get("type") == "fixed_cost"), None)
-            if cost_item:
-                bill += f"Ingredients: ₦{cost_item.get('total_price', 0)}\n"
+    if service_charge > 0:
+        bill += f"- Service Charge = ₦{service_charge}\n"
+    if pack_fee > 0:
+        bill += f"- Pack = ₦{pack_fee}\n"
 
-        if pack_fee > 0:
-            bill += f"Pack Fee: ₦{pack_fee}\n"
-        bill += f"Service Charge: ₦{service_charge}\n"
-        bill += "----------------------\n"
-        bill += f"💰 <b>Total = ₦{total}</b>"
+    # Explicitly add cost of ingredients for spaghetti in the bill
+    if order.get("food") == "Spaghetti":
+        cost_item = next((item for item in items if item.get("type") == "fixed_cost"), None)
+        if cost_item:
+            bill += f"- Ingredients (x1) = ₦{cost_item.get('total_price', 0)}\n"
+
+    total = order.get("total", 0)
+    bill += "----------------------\n"
+    bill += f"💰 <b>Total = ₦{total}</b>"
 
     keyboard = [
         [
@@ -2173,7 +2166,6 @@ async def view_bill(update: Update, context: CallbackContext) -> int:
     reply_markup = InlineKeyboardMarkup(keyboard)
     await send_or_edit_message(update, bill, reply_markup=reply_markup, parse_mode='HTML')
     return ORDER_SUMMARY
-
 
 
 async def view_orders(update: Update, context: CallbackContext) -> int:
