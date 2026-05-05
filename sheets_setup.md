@@ -26,8 +26,8 @@ This sheet stores information about every user who interacts with the bot.
 ### `Orders` Sheet
 This sheet contains a record of every order placed.
 
-| order_id | user_id | username | food_type | items | total | service_charge | order_date | status | delivery_info | notes | taken_by | delivery_issue | spaghetti_quantity |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| order_id | user_id | username | food_type | items | total | service_charge | order_date | status | delivery_info | notes | taken_by | delivery_issue |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **order_id**: A unique ID for the order (e.g., a timestamp or an incrementing number).
 - **user_id**: The Telegram user ID of the person who placed the order.
@@ -42,13 +42,12 @@ This sheet contains a record of every order placed.
 - **notes**: Any additional notes provided by the user.
 - **taken_by**: The user ID of the worker who took the order.
 - **delivery_issue**: Text describing any delivery issue reported by the user or worker.
-- **spaghetti_quantity**: Stores the portion size for spaghetti orders ('half' or 'full').
 
 ### `Workers` Sheet
 This sheet manages all workers and their application status.
 
-| user_id | name | reg_no | matric_no | phone | status | gender | bank_name | account_number | account_name | payout | total_payout |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| user_id | name | reg_no | matric_no | phone | status | gender | bank_name | account_number | account_name | payout | total_payout | role |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - **user_id**: The worker's Telegram user ID.
 - **name**: The worker's full name.
@@ -62,6 +61,7 @@ This sheet manages all workers and their application status.
 - **account_name**: The name on the worker's bank account.
 - **payout**: A JSON string representing a list of payout records.
 - **total_payout**: The sum of all payouts for the worker.
+- **role**: The worker's role (`worker` or `chef`).
 
 ### `Feedback` Sheet
 This sheet collects feedback from customers.

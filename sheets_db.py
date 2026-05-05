@@ -44,7 +44,7 @@ def get_all_unique_users():
     user_ids = users_sheet.col_values(1)[1:] # Skip header
     return [int(uid) for uid in user_ids if uid.isdigit()]
 
-def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None, spaghetti_quantity=None):
+def add_order(user_id, username, food_type, items, total, service_charge, status='pending', delivery_info=None, notes=None):
     """Adds a new order to the Orders sheet."""
     order_id = int(time.time() * 1000)
     order_date = format_date()
@@ -72,11 +72,10 @@ def add_order(user_id, username, food_type, items, total, service_charge, status
 
     status_json = json.dumps(status_dict)
 
-    # The new column 'spaghetti_quantity' will be column 14
     new_row = [
         order_id, user_id, username, food_type, items_str, total,
         service_charge, order_date, status_json, delivery_info_str, notes,
-        "", "", spaghetti_quantity if spaghetti_quantity else ""
+        "", ""
     ]
     orders_sheet.append_row(new_row)
     add_or_update_user(user_id, username, "")
@@ -209,13 +208,14 @@ def update_order_status(order_id, status, actor='system', worker_id=None, delive
     except AttributeError:
         print(f"Error: Order ID {order_id} not found.")
 
-def add_worker(user_id, name, reg_no, matric_no, phone, gender, bank_name=None, account_number=None, account_name=None, status='pending'):
+def add_worker(user_id, name, reg_no, matric_no, phone, gender, bank_name=None, account_number=None, account_name=None, status='pending', role='worker'):
     """Adds a new worker application to the Workers sheet with a 'pending' status."""
     new_row = [
         user_id, name, reg_no, matric_no, phone, status, gender,
         bank_name, account_number, account_name,
         json.dumps([]),  # Payout (empty array)
-        0  # Total Payout
+        0,  # Total Payout
+        role
     ]
     workers_sheet.append_row(new_row)
 
@@ -231,6 +231,15 @@ def update_worker_status(user_id, new_status):
         cell = workers_sheet.find(str(user_id), in_column=1)
         # Column 6 is 'status'
         workers_sheet.update_cell(cell.row, 6, new_status)
+    except AttributeError:
+        print(f"Error: Worker with User ID {user_id} not found.")
+
+def update_worker_role(user_id, new_role):
+    """Updates the role of a worker."""
+    try:
+        cell = workers_sheet.find(str(user_id), in_column=1)
+        # Column 13 is 'role'
+        workers_sheet.update_cell(cell.row, 13, new_role)
     except AttributeError:
         print(f"Error: Worker with User ID {user_id} not found.")
 
