@@ -25,7 +25,8 @@ from sheets_db import (
     add_worker, get_all_workers, is_worker, update_order_status,
     get_worker_orders, get_order_by_id, get_all_unique_users,
     add_payment, get_all_payments, add_feedback, get_all_feedback, get_orders_by_status,
-    add_or_update_user, get_workers_by_status, update_worker_status, update_worker_payout
+    add_or_update_user, get_workers_by_status, update_worker_status, update_worker_payout,
+    update_worker_role
 )
 from messages import (
     SHARE_MESSAGE, RAINY, COLD, HOT, SUNDAY, CASUAL, FAQ_MESSAGE
@@ -77,8 +78,12 @@ PRICES = {
     "gashia": 1200,
     "chicken_sauce": 1200,
     "canned_corn": 2000,
-    "cost_of_ingredients_half": 2800,
-    "cost_of_ingredients_full": 4000,
+    "cost_of_ingredients_half": 2900,
+    "cost_of_ingredients_full": 4200,
+
+    # New Beverages
+    "willis_sache": 150,
+    "willis_cocktail": 1500,
 
     # Fees and Service Charges
     "pack_fee": 300,
@@ -283,7 +288,12 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
     INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY,
     DECLINE_REASON,
     INDOMIE_PRESET,
-) = range(66)
+    INDOMIE_WILLIS_SACHE_QUANTITY,
+    INDOMIE_WILLIS_COCKTAIL_QUANTITY,
+    ADMIN_POLL_QUESTION,
+    ADMIN_POLL_OPTIONS,
+    ADMIN_MANAGE_CHEF,
+) = range(71)
 
 
 async def start(update: Update, context: CallbackContext) -> int:
@@ -503,7 +513,7 @@ async def notify_workers(context: CallbackContext, order_id: int):
         return
 
     all_workers = get_all_workers()
-    eligible_workers = [w for w in all_workers if w.get('gender') == target_gender]
+    eligible_workers = [w for w in all_workers if w.get('gender') == target_gender or w.get('role') == 'chef']
     
     if not eligible_workers:
         # Fallback: Notify admin
@@ -543,14 +553,10 @@ async def notify_admin_of_new_kitchen_order(context: CallbackContext, order_id: 
     
     keyboard = [[InlineKeyboardButton("✅ Review Order", callback_data=f"review_{order_id}")]]
     if order.get('food_type') == "Spaghetti":
-        # Extract spaghetti quantity from items list (a bit complex, might need refinement)
+        # Extract spaghetti quantity from items list
         items = json.loads(order.get('items', '[]'))
         spaghetti_item = next((item for item in items if "spaghetti" in item.get('name', '').lower()), None)
         if spaghetti_item:
-             # This part is tricky as quantity (half/full) is not directly in items.
-             # Let's assume we can pass it somehow or derive it. For now, let's just add the button.
-             # A better approach would be to save the spaghetti_quantity in the order details.
-             # For now, we will just add a generic button. A proper implementation needs order data adjusted.
              keyboard.append([InlineKeyboardButton("Read Ingredients", callback_data=f"view_ingredients_{order_id}")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1487,6 +1493,10 @@ def beverage_keyboard():
             InlineKeyboardButton("Willis Drink Tropical (₦1000)", callback_data="bev_willis_drink_tropical"),
         ],
         [
+            InlineKeyboardButton("Willis Saché (₦150)", callback_data="bev_willis_sache"),
+            InlineKeyboardButton("Willis Cocktail (₦1500)", callback_data="bev_willis_cocktail"),
+        ],
+        [
             InlineKeyboardButton("Ice (₦250)", callback_data="bev_ice")
         ],
         [InlineKeyboardButton("None", callback_data="bev_none")],
@@ -1514,6 +1524,11 @@ async def ask_for_beverage_quantities(update: Update, context: CallbackContext) 
             message_text, next_state = "How many Willis drinks (Regular) would you like?", INDOMIE_WILLIS_DRINK_QUANTITY
         elif next_beverage_to_ask == "willis_drink_tropical":
             message_text, next_state = "How many Willis drinks (Tropical) would you like?", INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY
+        elif next_beverage_to_ask == "willis_sache":
+            message_text, next_state = "How many Willis Saché would you like?", INDOMIE_WILLIS_SACHE_QUANTITY
+        elif next_beverage_to_ask == "willis_cocktail":
+            message_text = "How many Willis Cocktail would you like?"
+            next_state = INDOMIE_WILLIS_COCKTAIL_QUANTITY
         elif next_beverage_to_ask == "ice":
             message_text, next_state = "How many packs of ice would you like?", INDOMIE_ICE_QUANTITY
 
@@ -1642,6 +1657,12 @@ async def get_willis_drink_quantity(update: Update, context: CallbackContext) ->
 
 async def get_willis_drink_tropical_quantity(update: Update, context: CallbackContext) -> int:
     return await get_beverage_quantity(update, context, "willis_drink_tropical", INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY)
+
+async def get_willis_sache_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_beverage_quantity(update, context, "willis_sache", INDOMIE_WILLIS_SACHE_QUANTITY)
+
+async def get_willis_cocktail_quantity(update: Update, context: CallbackContext) -> int:
+    return await get_beverage_quantity(update, context, "willis_cocktail", INDOMIE_WILLIS_COCKTAIL_QUANTITY)
 
 async def get_sausage_quantity(update: Update, context: CallbackContext) -> int:
     return await get_topping_quantity(update, context, "sausage", INDOMIE_SAUSAGE_QUANTITY)
@@ -1900,7 +1921,6 @@ async def spaghetti_quantity(update: Update, context: CallbackContext) -> int:
     quantity_type = query.data.split("_")[-1]  # 'half' or 'full'
 
     order = context.user_data["order"]
-    order["spaghetti_quantity"] = quantity_type
     items = order.get("items", [])
     items = [item for item in items if item.get("type") != "base"]
     
@@ -1985,7 +2005,8 @@ async def show_order_summary(update: Update, context: CallbackContext) -> int:
         elif order.get("food") == "Spaghetti":
             # For spaghetti, we modify the items list to add the ingredients cost
             current_items = [item for item in current_items if item.get("type") != "fixed_cost"]
-            if order.get("spaghetti_quantity") == "half":
+            is_half = any("Half Portion" in item.get("name", "") for item in current_items if item.get("type") == "base")
+            if is_half:
                 current_items.append({"name": "Ingredients", "type": "fixed_cost", "unit_price": PRICES.get("cost_of_ingredients_half"), "quantity": 1, "total_price": PRICES.get("cost_of_ingredients_half")})
                 service_charge = PRICES.get("service_charge_spaghetti_half")
             else:  # Full portion
@@ -2048,13 +2069,11 @@ async def proceed_to_payment(update: Update, context: CallbackContext) -> int:
         "delivery_time": order.get("delivery_time"),
     }
 
-    spaghetti_quantity = order.get("spaghetti_quantity") if order.get("food") == "Spaghetti" else None
     order_id = add_order(
         user_id=update.effective_user.id, username=update.effective_user.username,
         food_type=order["food"], items=order.get("items", []), total=order["total"],
         service_charge=order.get("service_charge", 0), status='pending_payment',
-        delivery_info=delivery_info, notes=order.get("notes"),
-        spaghetti_quantity=spaghetti_quantity
+        delivery_info=delivery_info, notes=order.get("notes")
     )
     context.user_data["order_id"] = order_id
 
@@ -2253,6 +2272,7 @@ async def admin_checkin_menu(update: Update, context: CallbackContext) -> int:
         [InlineKeyboardButton("☀️ Hot", callback_data="checkin_hot")],
         [InlineKeyboardButton("🗓️ Sunday", callback_data="checkin_sunday")],
         [InlineKeyboardButton("💬 Casual", callback_data="checkin_casual")],
+        [InlineKeyboardButton("📊 Poll", callback_data="checkin_poll")],
         [InlineKeyboardButton("✍️ Custom", callback_data="checkin_custom")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
     ]
@@ -2288,6 +2308,53 @@ async def handle_custom_broadcast(update: Update, context: CallbackContext) -> i
     await broadcast_message(context, custom_message)
     await update.message.reply_text("✅ Successfully broadcasted your custom message to all users.")
 
+    return await admin_checkin_menu(update, context)
+
+async def admin_poll_prompt_question(update: Update, context: CallbackContext) -> int:
+    """Prompts the admin for the poll question."""
+    query = update.callback_query
+    await query.answer()
+    await send_or_edit_message(update, "Please enter the question for the poll:")
+    return ADMIN_POLL_QUESTION
+
+async def admin_poll_prompt_options(update: Update, context: CallbackContext) -> int:
+    """Prompts the admin for the poll options."""
+    context.user_data["poll_question"] = update.message.text
+    await update.message.reply_text(
+        "Please enter the options for the poll, separated by commas (e.g., Option 1, Option 2, Option 3):"
+    )
+    return ADMIN_POLL_OPTIONS
+
+async def handle_poll_broadcast(update: Update, context: CallbackContext) -> int:
+    """Broadcasts a poll to all unique users."""
+    options_text = update.message.text
+    options = [opt.strip() for opt in options_text.split(",") if opt.strip()]
+    question = context.user_data.get("poll_question")
+
+    if len(options) < 2:
+        await update.message.reply_text("A poll must have at least 2 options. Please try again.")
+        return ADMIN_POLL_OPTIONS
+
+    user_ids = list(set(get_all_unique_users()))
+    count = 0
+    success = 0
+    total = len(user_ids)
+
+    logger.info(f"Starting poll broadcast to {total} users.")
+
+    for user_id in user_ids:
+        try:
+            await context.bot.send_poll(chat_id=user_id, question=question, options=options, is_anonymous=False)
+            success += 1
+            await asyncio.sleep(0.05)
+        except (RetryAfter, Forbidden, TelegramError, Exception) as e:
+            logger.error(f"Error sending poll to user {user_id}: {e}")
+
+        count += 1
+        if count % 50 == 0:
+            logger.info(f"Poll broadcast progress: {count}/{total} users processed.")
+
+    await update.message.reply_text(f"✅ Successfully broadcasted the poll to {success}/{total} users.")
     return await admin_checkin_menu(update, context)
 
 async def broadcast_message(context: CallbackContext, message: str):
@@ -2411,6 +2478,7 @@ def admin_workers_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("View All Workers", callback_data="view_workers_admin")],
         [InlineKeyboardButton("View Pending Applications", callback_data="view_pending_apps")],
+        [InlineKeyboardButton("👨‍🍳 Add Chef", callback_data="admin_add_chef")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_main_menu")],
     ])
 
@@ -2560,11 +2628,52 @@ async def view_workers_admin(update: Update, context: CallbackContext) -> int:
         await send_or_edit_message(update, "No registered workers yet.", reply_markup=admin_workers_menu_keyboard())
         return ADMIN_MENU
     message = "👷‍♂️ All Workers:\n" + "\n".join([
-        f"Name: {w.get('name')}, User: @{w.get('username', 'N/A')}, Status: {w.get('status', 'N/A')}"
+        f"Name: {w.get('name')}, User: @{w.get('username', 'N/A')}, Role: {w.get('role', 'worker')}, Status: {w.get('status', 'N/A')}"
         for w in workers_data
     ])
     await send_or_edit_message(update, message, reply_markup=admin_workers_menu_keyboard())
     return ADMIN_MENU
+
+async def admin_add_chef_list(update: Update, context: CallbackContext) -> int:
+    """Displays a list of approved workers who are not already chefs."""
+    query = update.callback_query
+    await query.answer()
+
+    workers = get_all_workers(approved_only=True)
+    eligible_workers = [w for w in workers if w.get('role') != 'chef']
+
+    if not eligible_workers:
+        await send_or_edit_message(update, "No eligible workers to promote to chef.", reply_markup=admin_workers_menu_keyboard())
+        return ADMIN_MENU
+
+    message = "Select a worker to promote to Chef (Chef can see all Cafe orders):"
+    keyboard = []
+    for w in eligible_workers:
+        keyboard.append([InlineKeyboardButton(f"{w.get('name')} (@{w.get('username', 'N/A')})", callback_data=f"promote_chef_{w.get('user_id')}")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="admin_workers")])
+    await send_or_edit_message(update, message, reply_markup=InlineKeyboardMarkup(keyboard))
+    return ADMIN_MANAGE_CHEF
+
+async def admin_promote_to_chef(update: Update, context: CallbackContext) -> int:
+    """Promotes a worker to the chef role."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = int(query.data.split("_")[-1])
+    update_worker_role(user_id, 'chef')
+
+    await query.edit_message_text(f"✅ Worker has been promoted to Chef.")
+
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="👨‍🍳 Congratulations! You have been promoted to Chef. You will now receive notifications for all Cafe orders."
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify worker of chef promotion: {e}")
+
+    return await admin_workers_menu(update, context)
 
 async def view_pending_applications_admin(update: Update, context: CallbackContext) -> int:
     applications_data = get_workers_by_status('pending')
@@ -2679,11 +2788,8 @@ async def view_ingredients(update: Update, context: CallbackContext) -> int:
     # We need to parse it to determine which ingredient list to show.
     try:
         items = json.loads(order.get('items', '[]'))
-        # This is a simplified check. A more robust way would be to check a dedicated field.
-        # We rely on the spaghetti_quantity being saved during the order flow.
-        # Let's assume the `add_order` function needs to be updated to save this.
-        # For now, we will try to get it from the raw order dictionary from the database.
-        spaghetti_quantity = order.get('spaghetti_quantity', 'full') # Default to full if not found
+        is_half = any("Half Portion" in item.get("name", "") for item in items if item.get("type") == "base")
+        spaghetti_quantity = 'half' if is_half else 'full'
     except json.JSONDecodeError:
         spaghetti_quantity = 'full' # Default if JSON is invalid
 
@@ -2691,25 +2797,25 @@ async def view_ingredients(update: Update, context: CallbackContext) -> int:
         ingredients = (
             "<b>Half Portion Spaghetti Ingredients:</b>\n\n"
             "- Tomato Paste: ₦500\n"
-            "- Vegetables: ₦700\n"
+            "- Vegetables: ₦800\n"
             "- Pepper: ₦200\n"
             "- Salt: ₦200\n"
             "- Thyme: ₦200\n"
             "- Chicken Sauce: ₦1000\n"
             "----------------------\n"
-            "<b>Total: ₦2800</b>"
+            "<b>Total: ₦2900</b>"
         )
     else: # Full portion
         ingredients = (
             "<b>Full Portion Spaghetti Ingredients:</b>\n\n"
             "- Tomato Paste: ₦1000\n"
-            "- Vegetables: ₦1400\n"
+            "- Vegetables: ₦1600\n"
             "- Pepper: ₦200\n"
             "- Salt: ₦200\n"
             "- Thyme: ₦200\n"
             "- Chicken Sauce: ₦1000\n"
             "----------------------\n"
-            "<b>Total: ₦4000</b>"
+            "<b>Total: ₦4200</b>"
         )
     
     keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"review_{order_id}")]]
@@ -2751,12 +2857,14 @@ async def main() -> None:
                 CallbackQueryHandler(view_all_orders_admin, pattern=r"^view_all_orders_admin(_page_\d+)?$"),
                 CallbackQueryHandler(view_workers_admin, pattern="^view_workers_admin$"),
                 CallbackQueryHandler(view_pending_applications_admin, pattern="^view_pending_apps$"),
+                CallbackQueryHandler(admin_add_chef_list, pattern="^admin_add_chef$"),
                 CallbackQueryHandler(admin_checkin_menu, pattern="^admin_checkin$"),
                 CallbackQueryHandler(handle_worker_approval, pattern="^(approve|reject)_"),
                 CallbackQueryHandler(worker_accept_order, pattern="^accept_"),
             ],
             ADMIN_CHECKIN_MENU: [
                 CallbackQueryHandler(handle_checkin_broadcast, pattern="^checkin_(rainy|cold|hot|sunday|casual)$"),
+                CallbackQueryHandler(admin_poll_prompt_question, pattern="^checkin_poll$"),
                 CallbackQueryHandler(admin_custom_message_prompt, pattern="^checkin_custom$"),
                 CallbackQueryHandler(admin_main_menu_callback, pattern="^admin_main_menu$"),
             ],
@@ -2765,6 +2873,16 @@ async def main() -> None:
             ],
             ADMIN_CUSTOM_MESSAGE_PROMPT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_broadcast)
+            ],
+            ADMIN_POLL_QUESTION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_poll_prompt_options)
+            ],
+            ADMIN_POLL_OPTIONS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_poll_broadcast)
+            ],
+            ADMIN_MANAGE_CHEF: [
+                CallbackQueryHandler(admin_promote_to_chef, pattern="^promote_chef_"),
+                CallbackQueryHandler(admin_workers_menu, pattern="^admin_workers$"),
             ],
         },
         fallbacks=[CommandHandler("admin", admin_start), CommandHandler("start", start_over)],
@@ -2828,6 +2946,8 @@ async def main() -> None:
             INDOMIE_JUICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_juice_quantity)],
             INDOMIE_WILLIS_DRINK_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_quantity)],
             INDOMIE_WILLIS_DRINK_TROPICAL_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_drink_tropical_quantity)],
+            INDOMIE_WILLIS_SACHE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_sache_quantity)],
+            INDOMIE_WILLIS_COCKTAIL_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_willis_cocktail_quantity)],
             INDOMIE_ICE_QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ice_quantity)],
             INDOMIE_PRESET: [
                 CallbackQueryHandler(indomie_preset, pattern="^indomie_preset_"),
